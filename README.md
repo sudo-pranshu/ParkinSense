@@ -32,6 +32,11 @@ The platform consists of:
 - Bluetooth Low Energy connectivity
 - Rechargeable Li-ion battery
 - Future support for optical heart-rate sensing and skin temperature monitoring
+- Planned Expansion:
+* Optical PPG Sensor
+* Skin Temperature Sensor
+* Extended Battery System
+* Custom Wearable PCB
 
 ### Signal Processing Layer
 
@@ -55,19 +60,59 @@ The platform consists of:
 - Machine learning assisted symptom analysis
 
 ---
+##Digital Biomarkers
 
+###Tremor Metrics
+
+* Tremor Frequency
+* Tremor Amplitude
+* Tremor Energy
+* Tremor Burden
+
+###Motor Function Metrics
+
+* Bradykinesia Index
+* Movement Velocity
+* Movement Variability
+* Motion Asymmetry
+
+###Physiological Metrics
+
+* Heart Rate
+* Heart Rate Variability
+* Sleep Quality
+* Recovery Metrics
+
+###Longitudinal Metrics
+
+* Daily Symptom Trends
+* Medication Response
+* Progression Indicators
+* Behavioral Patterns---
 ## Repository Structure
 
 ```text
 ParkinSense/
 
 ├── firmware/
-├── hardware/
-├── mobile_app/
+│   └── xiao_nrf52840/
+│
 ├── dashboard/
+│   └── python/
+│
+├── hardware/
+│
 ├── docs/
+│   ├── Architecture/
+│   ├── Clinical/
+│   └── SRS/
+│
 ├── research/
+│
 ├── data/
+│   ├── raw/
+│   └── metadata/
+│
 └── README.md
 ```
 
@@ -75,53 +120,61 @@ ParkinSense/
 
 ## Development Roadmap
 
-### Phase 1 — Data Acquisition
+Phase 1 — Sensor Acquisition
 
-- Sensor integration
-- BLE communication
-- Data logging
-- Battery optimization
+* IMU integration
+* Real-time streaming
+* Data recording
+* Signal validation
 
-### Phase 2 — Tremor Analytics
+Phase 2 — Signal Processing
 
-- Frequency analysis
-- Amplitude estimation
-- Spectral analysis
-- Tremor event detection
+* FFT analysis
+* Frequency-domain features
+* Tremor detection
+* Noise reduction
 
-### Phase 3 — Continuous Monitoring
+Phase 3 — Biomarker Development
 
-- Daily symptom tracking
-- Long-term trend analysis
-- Sleep and activity monitoring
+* Tremor Index
+* Tremor Burden
+* Bradykinesia Metrics
+* Motion Classification
 
-### Phase 4 — Digital Biomarkers
+Phase 4 — Wearable Integration
 
-- Bradykinesia metrics
-- Tremor burden metrics
-- Medication response metrics
-- Movement asymmetry analysis
+* BLE synchronization
+* Mobile application
+* Battery optimization
+* Ergonomic enclosure
 
-### Phase 5 — Clinical Validation
+Phase 5 — Clinical Validation
 
-- Data collection studies
-- Comparative analysis
-- Clinical evaluation
+* Data collection studies
+* Algorithm validation
+* Biomarker evaluation
 
-### Phase 6 — Predictive Analytics
+Phase 6 — Predictive Analytics
 
-- Progression modelling
-- Risk scoring
-- Personalized monitoring
+* Longitudinal modelling
+* Progression estimation
+* Personalized monitoring
 
 ---
 
 ## Current Status
 
-Project planning and system architecture phase.
+Active development.
+
+Current milestone:
+
+* IMU acquisition complete
+* Dataset collection framework complete
+* FFT analysis complete
+* Tremor Index prototype complete
 
 ---
 
 ## Disclaimer
 
-ParkinSense is a research and educational project. It is not intended to diagnose, treat, cure, or prevent any disease and should not be used as a substitute for professional medical advice.
+ParkinSense is currently a research and educational project. It is intended to diagnose/detect, and not treat, cure or prevent any disease and should not be used as a substitute for professional medical advice.
