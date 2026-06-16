@@ -1,0 +1,9 @@
+# ParkinSense Dataset Log
+
+| Dataset | Duration | Description | Expected Tremor |
+|----------|----------|-------------|-----------------|
+| stationary_60s | 60s | Device resting on table | No |
+| normal_motion_60s | 60s | Normal hand movements | No |
+| walking_60s | 60s | Walking naturally | No |
+| simulated_tremor_30s | 30s | Intentional 4–6 Hz wrist oscillation | Yes |
+| vibration_reference_30s | 30s | Controlled vibration source | Yes |

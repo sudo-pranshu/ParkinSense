@@ -2,10 +2,12 @@ import serial
 import csv
 from datetime import datetime
 
-PORT = "/dev/cu.usbmodem1101"
+PORT = "/dev/cu.usbmodem1101" #replace
 BAUD = 115200
 
-filename = f"parksense_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+name = input("Dataset name: ")
+
+filename = f"data/raw/{name}.csv"
 
 ser = serial.Serial(PORT, BAUD)
 
