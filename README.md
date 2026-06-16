@@ -1,183 +1,273 @@
-ParkinSense
+# ParkinSense
 
-ParkinSense is a wearable platform designed for continuous monitoring of Parkinson’s disease symptoms using inertial and physiological sensing.
+<div align="center">
 
-The project aims to provide objective digital biomarkers that support early detection, symptom tracking, disease progression monitoring, and long-term clinical assessment.
+![Status](https://img.shields.io/badge/Status-Active%20Development-success)
+![Platform](https://img.shields.io/badge/Platform-nRF52840-blue)
+![Language](https://img.shields.io/badge/Language-C++%20%7C%20Python-orange)
+![Stage](https://img.shields.io/badge/Stage-Research-yellow)
+
+### Continuous Neurological Monitoring & Digital Biomarker Platform for Parkinson's Disease
+
+*Building the next generation of wearable neurological monitoring through real-world sensing, signal processing, and digital biomarkers.*
+
+</div>
+
+---
+
+## Overview
+
+ParkinSense is a wearable platform designed for continuous monitoring of Parkinson's disease symptoms using inertial and physiological sensing.
+
+The project aims to provide objective digital biomarkers that support:
+
+- Early detection research
+- Symptom tracking
+- Disease progression monitoring
+- Long-term clinical assessment
+- Digital health research
 
 Unlike traditional episodic clinical evaluations, ParkinSense focuses on continuous real-world monitoring through a lightweight wrist-worn device and a connected analytics platform.
 
-⸻
+---
 
-Objectives
+## Objectives
 
-* Continuous tremor monitoring
-* Tremor frequency and amplitude analysis
-* Daily tremor burden estimation
-* Bradykinesia assessment
-* Sleep and recovery tracking
-* Medication response monitoring
-* Longitudinal symptom progression analysis
-* Development of digital biomarkers for Parkinson’s disease
+### Core Monitoring
 
-⸻
+- Continuous tremor monitoring
+- Tremor frequency analysis
+- Tremor amplitude analysis
+- Tremor burden estimation
 
-System Overview
+### Motor Assessment
 
-The platform consists of:
+- Bradykinesia assessment
+- Movement variability analysis
+- Motion asymmetry detection
+- Activity classification
 
-Wearable Device
+### Physiological Monitoring
 
-* Seeed Studio XIAO nRF52840 Sense
-* 6-axis IMU sensing
-* Bluetooth Low Energy connectivity
-* Rechargeable Li-ion battery
-* Future support for optical heart-rate sensing and skin temperature monitoring
+- Sleep tracking
+- Recovery monitoring
+- Heart-rate monitoring *(planned)*
+- Heart-rate variability *(planned)*
 
-Planned Expansion
+### Clinical Analytics
 
-* Optical PPG Sensor
-* Skin Temperature Sensor
-* Extended Battery System
-* Custom Wearable PCB
+- Medication response monitoring
+- Longitudinal symptom progression analysis
+- Digital biomarker development
+- Research-driven neurological insights
 
-Signal Processing Layer
+---
 
-* Sensor calibration
-* Motion filtering
-* FFT-based tremor analysis
-* Feature extraction
-* Activity classification
+## System Architecture
 
-Analytics Platform
+```text
+ Wearable Device
+        │
+        ▼
+ Data Acquisition
+        │
+        ▼
+ Signal Processing
+        │
+        ▼
+ Digital Biomarkers
+        │
+        ▼
+ Analytics Dashboard
+        │
+        ▼
+ Clinical Insights
+```
 
-* Real-time monitoring dashboard
-* Historical symptom trends
-* Tremor burden tracking
-* Clinical data visualization
+---
 
-Research Layer
+## Hardware Platform
 
-* Digital biomarker development
-* Parkinson’s disease progression modelling
-* Machine learning assisted symptom analysis
+### Current Hardware
 
-⸻
+- Seeed Studio XIAO nRF52840 Sense
+- LSM6DS3 6-Axis IMU
+- Bluetooth Low Energy (BLE)
+- USB-C Interface
+- Rechargeable Li-ion Battery
 
-Digital Biomarkers
+### Planned Expansion
 
-Tremor Metrics
+- Optical PPG Sensor
+- Skin Temperature Sensor
+- Extended Battery System
+- Custom Wearable PCB
+- WHOOP-Style Form Factor
 
-* Tremor Frequency
-* Tremor Amplitude
-* Tremor Energy
-* Tremor Burden
+---
 
-Motor Function Metrics
+## Digital Biomarkers
 
-* Bradykinesia Index
-* Movement Velocity
-* Movement Variability
-* Motion Asymmetry
+### Tremor Metrics
 
-Physiological Metrics
+- Tremor Frequency
+- Tremor Amplitude
+- Tremor Energy
+- Tremor Burden
 
-* Heart Rate
-* Heart Rate Variability
-* Sleep Quality
-* Recovery Metrics
+### Motor Function Metrics
 
-Longitudinal Metrics
+- Bradykinesia Index
+- Movement Velocity
+- Movement Variability
+- Motion Asymmetry
 
-* Daily Symptom Trends
-* Medication Response
-* Progression Indicators
-* Behavioral Patterns
+### Physiological Metrics
 
-⸻
+- Heart Rate
+- Heart Rate Variability (HRV)
+- Sleep Quality
+- Recovery Metrics
 
-Repository Structure
+### Longitudinal Metrics
 
-ParkinSense/
-├── firmware/
-│   └── xiao_nrf52840/
+- Daily Symptom Trends
+- Medication Response
+- Progression Indicators
+- Behavioral Patterns
+
+---
+
+## Repository Structure
+
+```text
+ParkinSense
 │
-├── dashboard/
-│   └── python/
+├── firmware
+│   └── xiao_nrf52840
 │
-├── hardware/
+├── dashboard
+│   └── python
 │
-├── docs/
-│   ├── Architecture/
-│   ├── Clinical/
-│   └── SRS/
+├── hardware
 │
-├── research/
+├── docs
+│   ├── Architecture
+│   ├── Clinical
+│   └── SRS
 │
-├── data/
-│   ├── raw/
-│   └── metadata/
+├── research
+│
+├── data
+│   ├── raw
+│   └── metadata
 │
 └── README.md
+```
 
-⸻
+---
 
-Development Roadmap
+## Development Roadmap
 
-Phase 1 — Sensor Acquisition
+### Phase 1 — Sensor Acquisition
 
-* IMU integration
-* Real-time streaming
-* Data recording
-* Signal validation
+- [x] IMU Integration
+- [x] Real-Time Streaming
+- [x] Data Recording
+- [x] Signal Validation
 
-Phase 2 — Signal Processing
+### Phase 2 — Signal Processing
 
-* FFT analysis
-* Frequency-domain features
-* Tremor detection
-* Noise reduction
+- [x] FFT Analysis
+- [x] Frequency-Domain Features
+- [ ] Tremor Detection v2
+- [ ] Noise Reduction Pipeline
 
-Phase 3 — Biomarker Development
+### Phase 3 — Biomarker Development
 
-* Tremor Index
-* Tremor Burden
-* Bradykinesia Metrics
-* Motion Classification
+- [x] Tremor Index Prototype
+- [ ] Tremor Burden Estimation
+- [ ] Bradykinesia Metrics
+- [ ] Motion Classification
 
-Phase 4 — Wearable Integration
+### Phase 4 — Wearable Integration
 
-* BLE synchronization
-* Mobile application
-* Battery optimization
-* Ergonomic enclosure
+- [ ] BLE Synchronization
+- [ ] Mobile Application
+- [ ] Battery Optimization
+- [ ] Ergonomic Enclosure
 
-Phase 5 — Clinical Validation
+### Phase 5 — Clinical Validation
 
-* Data collection studies
-* Algorithm validation
-* Biomarker evaluation
+- [ ] Data Collection Studies
+- [ ] Algorithm Validation
+- [ ] Biomarker Evaluation
+- [ ] Pilot Testing
 
-Phase 6 — Predictive Analytics
+### Phase 6 — Predictive Analytics
 
-* Longitudinal modelling
-* Progression estimation
-* Personalized monitoring
+- [ ] Longitudinal Modelling
+- [ ] Progression Estimation
+- [ ] Personalized Monitoring
+- [ ] AI-Assisted Analysis
 
-⸻
+---
 
-Current Status
+## Current Status
 
-Active development.
+### Completed
 
-Current milestone:
+- IMU acquisition pipeline
+- Real-time sensor streaming
+- Dataset collection framework
+- FFT analysis pipeline
+- Tremor Index prototype
+- Analytics architecture
 
-* IMU acquisition complete
-* Dataset collection framework complete
-* FFT analysis complete
-* Tremor Index prototype complete
+### In Progress
 
-⸻
+- Structured dataset acquisition
+- Tremor Detector v2
+- Sliding-window analysis
+- Frequency stability analysis
 
-Disclaimer
+### Upcoming
 
-ParkinSense is currently a research and educational project. It is intended to diagnose/detect, and not treat, cure or prevent any disease and should not be used as a substitute for professional medical advice.
+- Tremor burden estimation
+- BLE streaming
+- Real-time dashboard enhancements
+- Bradykinesia analytics
+
+---
+
+## Research Focus
+
+ParkinSense is being developed as a digital biomarker platform that extends beyond simple tremor detection.
+
+Current research areas include:
+
+- Tremor characterization
+- Tremor burden estimation
+- Rest-state tremor detection
+- Bradykinesia assessment
+- Longitudinal monitoring
+- Wearable neurological sensing
+- Continuous disease monitoring
+
+---
+
+## Disclaimer
+
+ParkinSense is currently a research and educational project.
+
+This project is not a certified medical device and should not be used as a substitute for professional medical advice, diagnosis, or treatment.
+
+Any analyses, metrics, or outputs generated by this platform are intended solely for research, educational, and exploratory purposes.
+
+---
+
+<div align="center">
+
+**ParkinSense • Wearable Neurological Monitoring • Digital Biomarkers • Parkinson's Research**
+
+</div>
