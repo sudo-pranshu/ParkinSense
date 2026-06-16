@@ -1,4 +1,4 @@
-# ParkinSense
+ParkinSense
 
 ParkinSense is a wearable platform designed for continuous monitoring of Parkinson’s disease symptoms using inertial and physiological sensing.
 
@@ -6,94 +6,98 @@ The project aims to provide objective digital biomarkers that support early dete
 
 Unlike traditional episodic clinical evaluations, ParkinSense focuses on continuous real-world monitoring through a lightweight wrist-worn device and a connected analytics platform.
 
----
+⸻
 
-## Objectives
+Objectives
 
-- Continuous tremor monitoring
-- Tremor frequency and amplitude analysis
-- Daily tremor burden estimation
-- Bradykinesia assessment
-- Sleep and recovery tracking
-- Medication response monitoring
-- Longitudinal symptom progression analysis
-- Development of digital biomarkers for Parkinson’s disease
+* Continuous tremor monitoring
+* Tremor frequency and amplitude analysis
+* Daily tremor burden estimation
+* Bradykinesia assessment
+* Sleep and recovery tracking
+* Medication response monitoring
+* Longitudinal symptom progression analysis
+* Development of digital biomarkers for Parkinson’s disease
 
----
+⸻
 
-## System Overview
+System Overview
 
 The platform consists of:
 
-### Wearable Device
+Wearable Device
 
-- Seeed Studio XIAO nRF52840 Sense
-- 6-axis IMU sensing
-- Bluetooth Low Energy connectivity
-- Rechargeable Li-ion battery
-- Future support for optical heart-rate sensing and skin temperature monitoring
-- Planned Expansion:
+* Seeed Studio XIAO nRF52840 Sense
+* 6-axis IMU sensing
+* Bluetooth Low Energy connectivity
+* Rechargeable Li-ion battery
+* Future support for optical heart-rate sensing and skin temperature monitoring
+
+Planned Expansion
+
 * Optical PPG Sensor
 * Skin Temperature Sensor
 * Extended Battery System
 * Custom Wearable PCB
 
-### Signal Processing Layer
+Signal Processing Layer
 
-- Sensor calibration
-- Motion filtering
-- FFT-based tremor analysis
-- Feature extraction
-- Activity classification
+* Sensor calibration
+* Motion filtering
+* FFT-based tremor analysis
+* Feature extraction
+* Activity classification
 
-### Analytics Platform
+Analytics Platform
 
-- Real-time monitoring dashboard
-- Historical symptom trends
-- Tremor burden tracking
-- Clinical data visualization
+* Real-time monitoring dashboard
+* Historical symptom trends
+* Tremor burden tracking
+* Clinical data visualization
 
-### Research Layer
+Research Layer
 
-- Digital biomarker development
-- Parkinson’s disease progression modelling
-- Machine learning assisted symptom analysis
+* Digital biomarker development
+* Parkinson’s disease progression modelling
+* Machine learning assisted symptom analysis
 
----
-##Digital Biomarkers
+⸻
 
-###Tremor Metrics
+Digital Biomarkers
+
+Tremor Metrics
 
 * Tremor Frequency
 * Tremor Amplitude
 * Tremor Energy
 * Tremor Burden
 
-###Motor Function Metrics
+Motor Function Metrics
 
 * Bradykinesia Index
 * Movement Velocity
 * Movement Variability
 * Motion Asymmetry
 
-###Physiological Metrics
+Physiological Metrics
 
 * Heart Rate
 * Heart Rate Variability
 * Sleep Quality
 * Recovery Metrics
 
-###Longitudinal Metrics
+Longitudinal Metrics
 
 * Daily Symptom Trends
 * Medication Response
 * Progression Indicators
-* Behavioral Patterns---
-## Repository Structure
+* Behavioral Patterns
 
-```text
+⸻
+
+Repository Structure
+
 ParkinSense/
-
 ├── firmware/
 │   └── xiao_nrf52840/
 │
@@ -114,11 +118,10 @@ ParkinSense/
 │   └── metadata/
 │
 └── README.md
-```
 
----
+⸻
 
-## Development Roadmap
+Development Roadmap
 
 Phase 1 — Sensor Acquisition
 
@@ -160,9 +163,9 @@ Phase 6 — Predictive Analytics
 * Progression estimation
 * Personalized monitoring
 
----
+⸻
 
-## Current Status
+Current Status
 
 Active development.
 
@@ -173,8 +176,8 @@ Current milestone:
 * FFT analysis complete
 * Tremor Index prototype complete
 
----
+⸻
 
-## Disclaimer
+Disclaimer
 
 ParkinSense is currently a research and educational project. It is intended to diagnose/detect, and not treat, cure or prevent any disease and should not be used as a substitute for professional medical advice.
