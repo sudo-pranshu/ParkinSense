@@ -1,6 +1,9 @@
 import serial
 import csv
 from datetime import datetime
+import os
+
+os.makedirs("data/raw", exist_ok=True)
 
 PORT = "/dev/cu.usbmodem1101" #replace
 BAUD = 115200
