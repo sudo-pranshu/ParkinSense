@@ -10,6 +10,9 @@
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 
+unsigned long startTime = 0;
+uint32_t sampleCount = 0;
+
 Adafruit_SSD1306 display(
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
@@ -33,7 +36,7 @@ String motionState = "IDLE";
 // ================= SETUP =================
 
 void setup() {
-
+  startTime = millis();
   Serial.begin(115200);
 
   Wire.begin();
@@ -73,78 +76,69 @@ void setup() {
 
 // ================= LOOP =================
 
-void loop() {
+void loop()
+{
+  float gx = myIMU.readFloatGyroX();
+  float gy = myIMU.readFloatGyroY();
+  float gz = myIMU.readFloatGyroZ();
 
-  ax = imu.readFloatAccelX();
-  ay = imu.readFloatAccelY();
-  az = imu.readFloatAccelZ();
-
-  gx = imu.readFloatGyroX();
-  gy = imu.readFloatGyroY();
-  gz = imu.readFloatGyroZ();
+  float motion =
+      abs(gx) +
+      abs(gy) +
+      abs(gz);
 
   sampleCount++;
 
-  float motionMagnitude =
-    abs(gx) +
-    abs(gy) +
-    abs(gz);
+  unsigned long elapsed =
+      (millis() - startTime) / 1000;
 
-  if (motionMagnitude > 20) {
-    motionState = "ACTIVE";
-  }
-  else {
-    motionState = "IDLE";
-  }
-
-  // ===== SERIAL =====
-
-  Serial.print(sampleCount);
-  Serial.print(",");
-
-  Serial.print(ax);
-  Serial.print(",");
-  Serial.print(ay);
-  Serial.print(",");
-  Serial.print(az);
-  Serial.print(",");
-  Serial.print(gx);
-  Serial.print(",");
-  Serial.print(gy);
-  Serial.print(",");
-  Serial.println(gz);
-
-  // ===== OLED =====
+  int minutes = elapsed / 60;
+  int seconds = elapsed % 60;
 
   display.clearDisplay();
 
   display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
 
   display.setCursor(0, 0);
   display.println("ParkinSense");
 
   display.drawLine(
-    0, 10,
-    128, 10,
-    SSD1306_WHITE
-  );
+      0,
+      10,
+      127,
+      10,
+      SSD1306_WHITE);
 
+  // TIMER
   display.setCursor(0, 18);
-  display.print("IMU: OK");
+  display.print("Time: ");
 
-  display.setCursor(0, 32);
-  display.print("Motion:");
+  if (minutes < 10)
+      display.print("0");
 
-  display.setCursor(55, 32);
-  display.print(motionState);
+  display.print(minutes);
+  display.print(":");
 
+  if (seconds < 10)
+      display.print("0");
+
+  display.println(seconds);
+
+  // SAMPLE COUNT
+  display.setCursor(0, 34);
+  display.print("Samples: ");
+  display.println(sampleCount);
+
+  // MOTION STATUS
   display.setCursor(0, 50);
-  display.print("Samples:");
 
-  display.setCursor(60, 50);
-  display.print(sampleCount);
+  if (motion > 20)
+      display.print("ACTIVE");
+  else
+      display.print("IDLE");
 
   display.display();
 
-  delay(10); // ~100 Hz
+  delay(10);
 }
