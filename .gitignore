@@ -1,2 +1,4 @@
 # Sensor recordings
 data/raw/*.csv
+.DS_Store
+**/.DS_Store
