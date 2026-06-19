@@ -1,71 +1,62 @@
-#include <Arduino.h>
-#include <bluefruit.h>
-#include <Wire.h>
-#include "LSM6DS3.h"
-
-LSM6DS3 imu(I2C_MODE, 0x6A);
-
-// BLE UART
-BLEUart bleuart;
-
-uint32_t lastSample = 0;
-const uint32_t SAMPLE_INTERVAL_MS = 20; // 50 Hz
-
-void setup()
+if ((nowUs - lastSampleUs) < SAMPLE_INTERVAL_US)
 {
-    Serial.begin(115200);
-
-    Wire.begin();
-
-    if (imu.begin() != 0)
-    {
-        Serial.println("IMU INIT FAILED");
-        while (1);
-    }
-
-    Bluefruit.begin();
-    Bluefruit.setTxPower(4);
-    Bluefruit.setName("ParkinSense");
-
-    bleuart.begin();
-
-    Bluefruit.Advertising.addFlags(
-        BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE
-    );
-
-    Bluefruit.Advertising.addTxPower();
-    Bluefruit.Advertising.addName();
-
-    Bluefruit.Advertising.start(0);
-
-    Serial.println("ParkinSense BLE Ready");
+    return;
 }
 
-void loop()
+lastSampleUs += SAMPLE_INTERVAL_US;
+
+float ax_f = imu.readFloatAccelX();
+float ay_f = imu.readFloatAccelY();
+float az_f = imu.readFloatAccelZ();
+
+float gx_f = imu.readFloatGyroX();
+float gy_f = imu.readFloatGyroY();
+float gz_f = imu.readFloatGyroZ();
+
+if (batchIndex == 0)
 {
-    if (millis() - lastSample < SAMPLE_INTERVAL_MS)
-        return;
+    packet.header.timestamp_us = micros();
+}
 
-    lastSample = millis();
+packet.samples[batchIndex].ax =
+    (int16_t)(ax_f * 8192.0f);
 
-    float ax = imu.readFloatAccelX();
-    float ay = imu.readFloatAccelY();
-    float az = imu.readFloatAccelZ();
+packet.samples[batchIndex].ay =
+    (int16_t)(ay_f * 8192.0f);
 
-    float gx = imu.readFloatGyroX();
-    float gy = imu.readFloatGyroY();
-    float gz = imu.readFloatGyroZ();
+packet.samples[batchIndex].az =
+    (int16_t)(az_f * 8192.0f);
 
-    String packet =
-        String(millis()) + "," +
-        String(ax, 4) + "," +
-        String(ay, 4) + "," +
-        String(az, 4) + "," +
-        String(gx, 4) + "," +
-        String(gy, 4) + "," +
-        String(gz, 4);
+packet.samples[batchIndex].gx =
+    (int16_t)(gx_f * 131.0f);
 
-    bleuart.println(packet);
+packet.samples[batchIndex].gy =
+    (int16_t)(gy_f * 131.0f);
 
-    Serial.println(packet);
+packet.samples[batchIndex].gz =
+    (int16_t)(gz_f * 131.0f);
+
+batchIndex++;
+sampleCounter++;
+
+if (batchIndex >= BATCH_SIZE)
+{
+    if (Bluefruit.connected())
+    {
+        imuChar.notify(
+            (uint8_t*)&packet,
+            sizeof(packet)
+        );
+    }
+
+    batchIndex = 0;
+}
+
+if (millis() - lastRateReport >= 1000)
+{
+    Serial.print("RATE=");
+    Serial.println(sampleCounter);
+
+    sampleCounter = 0;
+    lastRateReport = millis();
 }
