@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/Platform-XIAO%20nRF52840%20Sense-blue)
 ![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20IMU-orange)
 ![Connectivity](https://img.shields.io/badge/BLE-100Hz%20Streaming-success)
-![Stage](https://img.shields.io/badge/Stage-Realtime%20Digital%20Biomarkers-yellow)
+![Stage](https://img.shields.io/badge/Stage-Realtime%20Neurological%20Analytics-yellow)
 
 ### Continuous Neurological Monitoring & Digital Biomarker Platform for Parkinson's Disease
 
@@ -18,17 +18,46 @@
 
 # Overview
 
-ParkinSense is a wearable neurological monitoring platform designed to continuously monitor Parkinsonian motor symptoms using a wrist-worn wearable and real-time signal processing.
+ParkinSense is a wearable neurological monitoring platform designed to continuously monitor Parkinsonian motor symptoms using a wrist-worn device and realtime signal processing.
 
-The system transforms raw inertial sensor data into clinically relevant digital biomarkers capable of supporting:
+The platform transforms raw inertial sensor data into clinically relevant digital biomarkers capable of supporting:
 
 - Continuous symptom monitoring
 - Tremor quantification
-- Medication response analysis
+- Medication response assessment
 - Disease progression research
 - Longitudinal neurological analytics
 
-Unlike traditional episodic clinical assessments, ParkinSense focuses on real-world continuous monitoring and objective symptom quantification.
+Unlike traditional episodic clinical assessments, ParkinSense focuses on objective, continuous monitoring in real-world environments.
+
+---
+
+# Current Achievements
+
+ParkinSense currently supports:
+
+- Continuous IMU acquisition at 104 Hz
+- Stable BLE streaming at ~100 Hz
+- Binary packet-based sensor transport
+- Realtime CSV data logging
+- FFT-based tremor analysis
+- Frequency stability tracking
+- Tremor confidence estimation
+- Tremor persistence filtering
+- Tremor burden estimation
+- Realtime analytics dashboard
+- Live neurological biomarker visualization
+
+Current platform status:
+
+```text
+Sensor Acquisition      ✅
+BLE Streaming           ✅
+Realtime Analytics      ✅
+Tremor Detection        ✅
+Digital Biomarkers      ✅
+Live Dashboard          ✅
+```
 
 ---
 
@@ -120,22 +149,18 @@ Python Receiver
 CSV Logging
       │
       ▼
-Realtime Tremor Analysis
+Realtime Analytics
 ```
 
 Packet Structure:
 
 ```text
 Packet Header
- ├─ Timestamp (4 bytes)
+ ├─ Timestamp
 
-10 IMU Samples
- ├─ ax
- ├─ ay
- ├─ az
- ├─ gx
- ├─ gy
- └─ gz
+IMU Samples
+ ├─ Accelerometer
+ └─ Gyroscope
 ```
 
 Packet Size:
@@ -146,38 +171,69 @@ Packet Size:
 
 ---
 
+# Realtime Analytics Engine
+
+ParkinSense performs realtime neurological analysis directly from BLE sensor streams.
+
+Analytics pipeline:
+
+```text
+BLE Stream
+     │
+     ▼
+Packet Decoder
+     │
+     ▼
+Rolling Window Buffer
+     │
+     ▼
+FFT Processing
+     │
+     ▼
+Feature Extraction
+     │
+     ▼
+Decision Engine
+     │
+     ▼
+Digital Biomarkers
+```
+
+Realtime outputs:
+
+- Dominant Tremor Frequency
+- Tremor Score
+- Tremor Confidence
+- Tremor Persistence
+- Tremor Burden
+- Classification Status
+
+---
+
 # Dataset Status
 
-Current datasets:
-
-- stationary_60s.csv
-- normal_motion_60s.csv
-- walking_60s.csv
-- simulated_tremor_30s.csv
-- vibration_reference_30s.csv
-
-Current Dataset Categories:
+Current datasets include:
 
 - Stationary Baseline
-- Daily Motion
-- Walking
+- Normal Daily Motion
+- Walking Motion
 - Simulated Parkinsonian Tremor
 - External Vibration Reference
 
-Current Collection Volume:
+Current collection volume:
 
 ```text
 7000+ Offline Samples
 10000+ Realtime Samples
 ```
 
-Dataset expansion is ongoing.
+Dataset expansion is ongoing to improve robustness and generalization.
 
 ---
 
 # Tremor Detection Pipeline
 
-Current Tremor Detector Version:
+Current Tremor Detector:
 
 ```text
 Tremor Detector V4
@@ -189,22 +245,22 @@ Pipeline:
 Gyroscope Magnitude
         │
         ▼
-5 Second Window
+Windowed Analysis
         │
         ▼
-FFT Analysis
+FFT Processing
         │
         ▼
-Dominant Frequency Extraction
+Frequency Extraction
         │
         ▼
-Band Energy Analysis
+Energy Analysis
         │
         ▼
 Frequency Stability Analysis
         │
         ▼
-Decision Gates
+Decision Engine
         │
         ▼
 Persistence Filter
@@ -215,62 +271,11 @@ Tremor Classification
 
 ---
 
-# Extracted Features
-
-Current features:
-
-- RMS Motion
-- Dominant Frequency
-- Frequency Stability
-- Band Energy Ratio
-- Best Tremor Axis
-- Tremor Confidence
-- Tremor Persistence
-- Tremor Burden
-
----
-
-# Decision Logic
-
-Current detector uses:
-
-## Motion Gate
-
-```text
-10 < RMS Motion < 70
-```
-
-## Frequency Gate
-
-```text
-4 Hz ≤ Frequency ≤ 7 Hz
-```
-
-## Energy Gate
-
-```text
-Band Energy Ratio > 0.30
-```
-
-## Stability Gate
-
-```text
-Frequency Std Dev < 1.50 Hz
-```
-
-Classification Threshold:
-
-```text
-Tremor Score ≥ 75
-```
-
----
-
 # Current Digital Biomarkers
 
 ## Tremor Frequency
 
-Dominant tremor frequency measured from FFT analysis.
+Dominant tremor frequency extracted from spectral analysis.
 
 ## Tremor Energy
 
@@ -278,15 +283,15 @@ Energy concentration within Parkinsonian tremor bands.
 
 ## Tremor Stability
 
-Temporal consistency of dominant tremor frequency.
+Temporal consistency of dominant tremor frequencies.
 
 ## Tremor Confidence
 
-Detector confidence score.
+Detector confidence estimation.
 
 ## Tremor Persistence
 
-Multi-window confirmation logic for reducing false positives.
+Multi-window validation logic for reducing false positives.
 
 ## Tremor Burden
 
@@ -294,7 +299,37 @@ Percentage of monitoring windows classified as tremor.
 
 ---
 
-# Current Repository Structure
+# Dashboard
+
+ParkinSense includes a realtime analytics dashboard built using Plotly Dash.
+
+Current dashboard capabilities:
+
+- Live Gyroscope Visualization
+- Realtime Tremor Metrics
+- Confidence Monitoring
+- Tremor Burden Tracking
+- Device Status Monitoring
+- Live Classification Display
+
+Dashboard architecture:
+
+```text
+BLE Receiver
+      │
+      ▼
+Realtime CSV
+      │
+      ▼
+Metrics Engine
+      │
+      ▼
+Plotly Dashboard
+```
+
+---
+
+# Repository Structure
 
 ```text
 ParkinSense
@@ -306,21 +341,22 @@ ParkinSense
 │   └── python
 │
 │       ├── analytics
-│       │    ├── tremor_detector_v3.py
-│       │
+│       │    └── tremor_detector_v3.py
+│
 │       ├── realtime
 │       │    ├── ble_receiver.py
 │       │    ├── realtime_tremor.py
-│       │    └── realtime_capture.csv
-│       │
+│       │    ├── realtime_capture.csv
+│       │    └── realtime_metrics.json
+│
+│       ├── dashboard
+│       │    └── realtime_dashboard.py
+│
 │       └── data
 │
 ├── hardware
-│
 ├── docs
-│
 ├── research
-│
 └── README.md
 ```
 
@@ -357,6 +393,7 @@ ParkinSense
 
 - [x] BLE Streaming
 - [x] Realtime Detection
+- [x] Realtime Dashboard
 - [ ] Battery Optimization
 - [ ] Wearable Enclosure
 - [ ] Mobile Dashboard
@@ -384,28 +421,32 @@ ParkinSense
 
 - IMU Acquisition Pipeline
 - Stable BLE Streaming (~100 Hz)
+- Binary Packet Protocol
 - Realtime Data Logging
 - FFT Processing Pipeline
 - Tremor Detector V4
 - Realtime Tremor Detection
 - Confidence Scoring
-- Tremor Persistence Logic
+- Persistence Filtering
 - Tremor Burden Tracking
+- Plotly Dashboard
+- Realtime Analytics Engine
 
 ## In Progress
 
 - Dataset Expansion
 - Biomarker Validation
-- Realtime Analytics Refinement
+- Dashboard Enhancements
 
 ## Upcoming
 
 - Bradykinesia Assessment
+- Activity Classification
 - MAX30102 Integration
-- HR Monitoring
+- Heart Rate Monitoring
 - HRV Monitoring
 - Sleep Analytics
-- Mobile Dashboard
+- Mobile Application
 
 ---
 
