@@ -1,4 +1,22 @@
-# Sensor recordings
-data/raw/*.csv
+# Sensor recording# Python
+__pycache__/
+*.pyc
+
+# Data captures
+realtime_capture.csv
+realtime_metrics.json
+# macOS
 .DS_Store
-**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Build artifacts
+build/
+dist/

@@ -3,6 +3,8 @@ import csv
 import struct
 import time
 
+import json
+
 from bleak import BleakScanner
 from bleak import BleakClient
 
@@ -25,6 +27,8 @@ sample_count = 0
 start_time = time.time()
 
 detector = RealtimeTremorDetector()
+
+METRICS_FILE = "realtime_metrics.json"
 
 csv_file = open(
     "realtime_capture.csv",
@@ -130,6 +134,23 @@ def notification_handler(sender, data):
 
             if result is not None:
 
+                metrics = {
+                    "dominant_frequency": float(result["dominant_frequency"]),
+                    "frequency_std": float(result["frequency_std"]),
+                    "band_ratio": float(result["band_ratio"]),
+                    "best_axis": result["best_axis"],
+                    "tremor_score": int(result["tremor_score"]),
+                    "confidence": int(result["confidence"]),
+                    "persistence": int(result["persistence"]),
+                    "tremor_burden": float(result["tremor_burden"]),
+                    "classification": "TREMOR" if result["tremor_detected"] else "NO TREMOR",
+                    "sample_count": int(sample_count),
+                    "packet_count": int(packet_count)
+                }
+
+                with open(METRICS_FILE, "w") as f:
+                    json.dump(metrics, f, indent=2)
+
                 print()
 
                 print(
@@ -142,16 +163,45 @@ def notification_handler(sender, data):
                 )
 
                 print(
+                    f"Frequency Std Dev: "
+                    f"{result['frequency_std']:.2f} Hz"
+                )
+
+                print(
                     f"Band Ratio: "
                     f"{result['band_ratio']:.3f}"
                 )
 
                 print(
-                    f"Tremor Score: "
-                    f"{result['tremor_score']}"
+                    f"Best Axis: "
+                    f"{result['best_axis']}"
                 )
 
-                if result["tremor_detected"]:
+                print()
+
+                print(
+                    f"Tremor Score: "
+                    f"{result['tremor_score']}/100"
+                )
+
+                print(
+                    f"Confidence: "
+                    f"{result['confidence']}%"
+                )
+
+                print(
+                    f"Persistence: "
+                    f"{result['persistence']}/5"
+                )
+
+                print(
+                    f"Tremor Burden: "
+                    f"{result['tremor_burden']:.1f}%"
+                )
+
+                print()
+
+                if result['tremor_detected']:
 
                     print(
                         "Classification: TREMOR"
