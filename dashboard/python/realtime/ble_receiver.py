@@ -160,7 +160,13 @@ def notification_handler(sender, data):
                         else "NO TREMOR",
 
                     "sample_count": int(sample_count),
-                    "packet_count": int(packet_count)
+                    "packet_count": int(packet_count),
+
+                    "sampling_rate": float(
+                        sample_count /
+                        max(1, time.time() - start_time)
+                    ),
+                    "dropped_packets": 0
                 }
 
                 with open(METRICS_FILE, "w") as f:

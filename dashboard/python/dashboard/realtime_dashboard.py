@@ -38,7 +38,9 @@ app.layout = html.Div(
 
             style={
                 "display": "flex",
-                "justifyContent": "space-around",
+                "justifyContent": "center",
+                "gap": "15px",
+                "flexWrap": "wrap",
                 "marginBottom": "20px"
             }
 
@@ -54,7 +56,7 @@ app.layout = html.Div(
 
         dcc.Interval(
             id="interval",
-            interval=1000,
+            interval=100,
             n_intervals=0
         )
     ]
@@ -129,6 +131,21 @@ def update_dashboard(_):
         create_card(
             "Confidence",
             f"{metrics.get('confidence',0)}%"
+        ),
+
+        create_card(
+            "Rest Index",
+            f"{metrics.get('rest_index',0):.2f}"
+        ),
+
+        create_card(
+            "Best Axis",
+            metrics.get("best_axis", "-")
+        ),
+
+        create_card(
+            "Band Ratio",
+            f"{metrics.get('band_ratio',0):.3f}"
         )
     ]
 
@@ -140,30 +157,35 @@ def update_dashboard(_):
 
         try:
 
-            df = pd.read_csv(CSV_FILE)
-
-            if len(df) > 1000:
-
-                df = df.tail(1000)
+            df = pd.read_csv(CSV_FILE).tail(400)
 
             gyro_fig.add_trace(
                 go.Scatter(
                     y=df["gx"],
-                    name="GX"
+                    name="GX",
+                    mode="lines",
+                    line=dict(width=2),
+                    line_shape="linear"
                 )
             )
 
             gyro_fig.add_trace(
                 go.Scatter(
                     y=df["gy"],
-                    name="GY"
+                    name="GY",
+                    mode="lines",
+                    line=dict(width=2),
+                    line_shape="linear"
                 )
             )
 
             gyro_fig.add_trace(
                 go.Scatter(
                     y=df["gz"],
-                    name="GZ"
+                    name="GZ",
+                    mode="lines",
+                    line=dict(width=2),
+                    line_shape="linear"
                 )
             )
 
@@ -182,7 +204,14 @@ def update_dashboard(_):
                         "axis": {
                             "range":
                             [0, 100]
-                        }
+                        },
+                        "bar": {"color": "orange"},
+                        "steps": [
+                            {"range": [0, 30],  "color": "green"},
+                            {"range": [30, 60], "color": "yellow"},
+                            {"range": [60, 80], "color": "orange"},
+                            {"range": [80, 100],"color": "red"}
+                        ]
                     }
                 )
             )
@@ -197,7 +226,19 @@ def update_dashboard(_):
 
         title="Live Gyroscope",
 
-        height=500
+        height=500,
+
+        margin=dict(l=20, r=20, t=40, b=20),
+
+        showlegend=True,
+
+        xaxis_title="Samples",
+
+        yaxis_title="Angular Velocity",
+
+        uirevision=True,
+
+        transition={"duration": 80}
     )
 
     score_fig.update_layout(
@@ -212,13 +253,27 @@ def update_dashboard(_):
 
 def create_card(title, value):
 
+    status_color = "#ffffff"
+
+    if str(value).upper() == "TREMOR":
+        status_color = "#ff8800"
+
+    if str(value).upper() == "NO TREMOR":
+        status_color = "#00cc66"
+
+    if str(value).upper() == "WAITING":
+        status_color = "#aaaaaa"
+
     return html.Div(
 
         [
 
             html.H4(title),
 
-            html.H2(str(value))
+            html.H2(
+                str(value),
+                style={"color": status_color}
+            )
 
         ],
 
@@ -230,7 +285,7 @@ def create_card(title, value):
 
             "borderRadius": "12px",
 
-            "width": "15%",
+            "width": "180px",
 
             "textAlign": "center"
         }
