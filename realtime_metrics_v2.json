@@ -1,0 +1,17 @@
+{
+  "classification": "NO TREMOR",
+  "tremor_score": 0,
+  "confidence": 24.121521212503147,
+  "severity": "NONE",
+  "dominant_frequency": 5.010416666666667,
+  "frequency_std": 1.3405566059994962,
+  "band_ratio": 0.8939462604206174,
+  "best_axis": "gx",
+  "axis_agreement": 0.3297216970002519,
+  "axis_dominance": 0.7152181376782353,
+  "motion_state": "REST",
+  "motion_rms": 0.0007676830390126902,
+  "sample_count": 10470,
+  "packet_count": 1047,
+  "sampling_rate": 101.47055362453317
+}
