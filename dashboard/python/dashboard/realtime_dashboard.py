@@ -2,50 +2,60 @@ import json
 import os
 
 import pandas as pd
+import plotly.graph_objects as go
 
 from dash import Dash
 from dash import dcc
 from dash import html
-from dash import Input
-from dash import Output
-
-import plotly.graph_objects as go
+from dash.dependencies import Input
+from dash.dependencies import Output
 
 
-CSV_FILE = "realtime_capture.csv"
 METRICS_FILE = "realtime_metrics.json"
+CSV_FILE = "realtime_capture.csv"
 
 app = Dash(__name__)
 
 app.layout = html.Div(
 
     style={
-        "fontFamily": "Arial",
-        "padding": "20px"
+        "backgroundColor": "#111111",
+        "color": "white",
+        "padding": "20px",
+        "fontFamily": "Arial"
     },
 
     children=[
 
         html.H1(
-            "ParkinSense Dashboard"
+            "ParkinSense Dashboard",
+            style={"textAlign": "center"}
         ),
 
-        html.H3(
-            "Realtime Parkinsonian Tremor Monitoring"
+        html.Div(
+
+            id="metric-cards",
+
+            style={
+                "display": "flex",
+                "justifyContent": "space-around",
+                "marginBottom": "20px"
+            }
+
+        ),
+
+        dcc.Graph(
+            id="gyro-graph"
+        ),
+
+        dcc.Graph(
+            id="score-graph"
         ),
 
         dcc.Interval(
             id="interval",
             interval=1000,
             n_intervals=0
-        ),
-
-        html.Div(
-            id="metrics"
-        ),
-
-        dcc.Graph(
-            id="gyro_graph"
         )
     ]
 )
@@ -54,22 +64,13 @@ app.layout = html.Div(
 @app.callback(
 
     [
-        Output(
-            "metrics",
-            "children"
-        ),
-
-        Output(
-            "gyro_graph",
-            "figure"
-        )
+        Output("metric-cards", "children"),
+        Output("gyro-graph", "figure"),
+        Output("score-graph", "figure")
     ],
 
     [
-        Input(
-            "interval",
-            "n_intervals"
-        )
+        Input("interval", "n_intervals")
     ]
 )
 
@@ -77,118 +78,112 @@ def update_dashboard(_):
 
     metrics = {}
 
-    if os.path.exists(
-        METRICS_FILE
-    ):
+    if os.path.exists(METRICS_FILE):
 
         try:
 
-            with open(
-                METRICS_FILE,
-                "r"
-            ) as f:
+            with open(METRICS_FILE, "r") as f:
 
                 metrics = json.load(f)
 
-        except Exception:
+        except:
 
             metrics = {}
 
-    metric_panel = html.Div(
+    cards = [
 
-        [
-
-            html.H2(
-                metrics.get(
-                    "classification",
-                    "WAITING..."
-                )
-            ),
-
-            html.P(
-                f"Dominant Frequency: "
-                f"{metrics.get('dominant_frequency',0):.2f} Hz"
-            ),
-
-            html.P(
-                f"Frequency Std Dev: "
-                f"{metrics.get('frequency_std',0):.2f}"
-            ),
-
-            html.P(
-                f"Band Ratio: "
-                f"{metrics.get('band_ratio',0):.3f}"
-            ),
-
-            html.P(
-                f"Tremor Score: "
-                f"{metrics.get('tremor_score',0)}"
-            ),
-
-            html.P(
-                f"Confidence: "
-                f"{metrics.get('confidence',0)}%"
-            ),
-
-            html.P(
-                f"Persistence: "
-                f"{metrics.get('persistence',0)}/5"
-            ),
-
-            html.P(
-                f"Tremor Burden: "
-                f"{metrics.get('tremor_burden',0):.1f}%"
-            ),
-
-            html.P(
-                f"Samples: "
-                f"{metrics.get('sample_count',0)}"
-            ),
-
-            html.P(
-                f"Packets: "
-                f"{metrics.get('packet_count',0)}"
+        create_card(
+            "Status",
+            metrics.get(
+                "classification",
+                "WAITING"
             )
+        ),
 
-        ]
-    )
+        create_card(
+            "Tremor Score",
+            metrics.get(
+                "tremor_score",
+                0
+            )
+        ),
 
-    fig = go.Figure()
+        create_card(
+            "Frequency",
+            f"{metrics.get('dominant_frequency',0):.2f} Hz"
+        ),
 
-    if os.path.exists(
-        CSV_FILE
-    ):
+        create_card(
+            "Severity",
+            metrics.get(
+                "severity",
+                "-"
+            )
+        ),
+
+        create_card(
+            "Burden",
+            f"{metrics.get('tremor_burden',0):.1f}%"
+        ),
+
+        create_card(
+            "Confidence",
+            f"{metrics.get('confidence',0)}%"
+        )
+    ]
+
+    gyro_fig = go.Figure()
+
+    score_fig = go.Figure()
+
+    if os.path.exists(CSV_FILE):
 
         try:
 
-            df = pd.read_csv(
-                CSV_FILE
-            )
+            df = pd.read_csv(CSV_FILE)
 
             if len(df) > 1000:
 
-                df = df.tail(
-                    1000
-                )
+                df = df.tail(1000)
 
-            fig.add_trace(
+            gyro_fig.add_trace(
                 go.Scatter(
                     y=df["gx"],
-                    name="gx"
+                    name="GX"
                 )
             )
 
-            fig.add_trace(
+            gyro_fig.add_trace(
                 go.Scatter(
                     y=df["gy"],
-                    name="gy"
+                    name="GY"
                 )
             )
 
-            fig.add_trace(
+            gyro_fig.add_trace(
                 go.Scatter(
                     y=df["gz"],
-                    name="gz"
+                    name="GZ"
+                )
+            )
+
+            score_fig.add_trace(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=metrics.get(
+                        "tremor_score",
+                        0
+                    ),
+                    title={
+                        "text":
+                        "Tremor Score"
+                    },
+                    gauge={
+                        "axis": {
+                            "range":
+                            [0, 100]
+                        }
+                    }
                 )
             )
 
@@ -196,20 +191,55 @@ def update_dashboard(_):
 
             pass
 
-    fig.update_layout(
+    gyro_fig.update_layout(
+
+        template="plotly_dark",
 
         title="Live Gyroscope",
 
-        xaxis_title="Samples",
-
-        yaxis_title="deg/s"
+        height=500
     )
 
-    return metric_panel, fig
+    score_fig.update_layout(
+
+        template="plotly_dark",
+
+        height=400
+    )
+
+    return cards, gyro_fig, score_fig
+
+
+def create_card(title, value):
+
+    return html.Div(
+
+        [
+
+            html.H4(title),
+
+            html.H2(str(value))
+
+        ],
+
+        style={
+
+            "backgroundColor": "#222222",
+
+            "padding": "20px",
+
+            "borderRadius": "12px",
+
+            "width": "15%",
+
+            "textAlign": "center"
+        }
+    )
 
 
 if __name__ == "__main__":
 
     app.run(
-        debug=True
+        debug=True,
+        port=8050
     )

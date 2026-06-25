@@ -19,6 +19,18 @@ class RealtimeTremorDetector:
             window_seconds
         )
 
+        self.ax_buffer = deque(
+            maxlen=self.window_size
+        )
+
+        self.ay_buffer = deque(
+            maxlen=self.window_size
+        )
+
+        self.az_buffer = deque(
+            maxlen=self.window_size
+        )
+
         self.gx_buffer = deque(
             maxlen=self.window_size
         )
@@ -42,10 +54,17 @@ class RealtimeTremorDetector:
 
     def add_sample(
         self,
+        ax,
+        ay,
+        az,
         gx,
         gy,
         gz
     ):
+
+        self.ax_buffer.append(ax)
+        self.ay_buffer.append(ay)
+        self.az_buffer.append(az)
 
         self.gx_buffer.append(gx)
         self.gy_buffer.append(gy)
@@ -63,6 +82,16 @@ class RealtimeTremorDetector:
         if not self.ready():
             return None
 
+        ax = np.array(
+            self.ax_buffer
+        )
+        ay = np.array(
+            self.ay_buffer
+        )
+        az = np.array(
+            self.az_buffer
+        )
+
         gx = np.array(
             self.gx_buffer
         )
@@ -74,6 +103,14 @@ class RealtimeTremorDetector:
         gz = np.array(
             self.gz_buffer
         )
+
+        acc_mag = np.sqrt(
+            ax**2 +
+            ay**2 +
+            az**2
+        )
+
+        rest_index = np.std(acc_mag)
 
         gyro_mag = np.sqrt(
             gx**2 +
@@ -185,94 +222,112 @@ class RealtimeTremorDetector:
                 energy_ratios
             )
 
-        axis_scores = []
+        # Axis coherence: dominant frequencies of gx, gy, gz
+        dom_freqs_axes = []
+        for axis_data in [gx, gy, gz]:
+            axis_data_centered = axis_data - np.mean(axis_data)
+            fft_axis = np.abs(rfft(axis_data_centered))
+            freq_axis = rfftfreq(len(axis_data_centered), d=1/self.sample_rate)
+            mask = (freq_axis >= 3) & (freq_axis <= 9)
+            if np.any(mask):
+                band_fft_axis = fft_axis[mask]
+                band_freq_axis = freq_axis[mask]
+                dom_freq = band_freq_axis[np.argmax(band_fft_axis)]
+                dom_freqs_axes.append(dom_freq)
+            else:
+                dom_freqs_axes.append(0)
+        axis_coherence = np.std(dom_freqs_axes)
+        coherence_std = axis_coherence
 
-        for signal in [
-            ("gx", gx),
-            ("gy", gy),
-            ("gz", gz)
-        ]:
-
-            axis_name = signal[0]
-
-            axis_data = (
-                signal[1] -
-                np.mean(signal[1])
-            )
-
-            fft_axis = np.abs(
-                rfft(axis_data)
-            )
-
-            freq_axis = rfftfreq(
-                len(axis_data),
-                d=1/self.sample_rate
-            )
-
-            axis_mask = (
-                (freq_axis >= 3) &
-                (freq_axis <= 9)
-            )
-
-            score = np.sum(
-                fft_axis[
-                    axis_mask
-                ] ** 2
-            )
-
-            axis_scores.append(
-                (
-                    axis_name,
-                    score
-                )
-            )
-
-        best_axis, _ = max(
-            axis_scores,
-            key=lambda x: x[1]
-        )
+        # Axis dominance: energy distribution 3-9 Hz per axis
+        energy_per_axis = []
+        total_energy_axes = 0
+        for axis_data in [gx, gy, gz]:
+            axis_data_centered = axis_data - np.mean(axis_data)
+            fft_axis = np.abs(rfft(axis_data_centered))
+            freq_axis = rfftfreq(len(axis_data_centered), d=1/self.sample_rate)
+            mask = (freq_axis >= 3) & (freq_axis <= 9)
+            band_fft_axis = fft_axis[mask]
+            energy = np.sum(band_fft_axis ** 2)
+            energy_per_axis.append(energy)
+            total_energy_axes += energy
+        if total_energy_axes > 0:
+            dominance = max(energy_per_axis) / total_energy_axes
+        else:
+            dominance = 0
 
         motion_gate = (
-            rms_motion > 10 and
-            rms_motion < 70
+            rms_motion > 1.5 and
+            rms_motion < 40
         )
 
         frequency_gate = (
-            4.0 <= mean_freq <= 7.0
+            3.5 <= mean_freq <= 7.0
         )
 
         energy_gate = (
-            mean_energy_ratio > 0.30
+            mean_energy_ratio > 0.15
         )
 
         stability_gate = (
             freq_std < 1.50
         )
 
+        coherence_gate = (
+            coherence_std < 1.00
+        )
+
+        dominance_gate = (
+            dominance > 0.55
+        )
+
+        rest_gate = (
+            rest_index < 0.20
+        )
+
         tremor_score = 0
 
         if motion_gate:
-            tremor_score += 25
+            tremor_score += 20
 
         if frequency_gate:
-            tremor_score += 25
+            tremor_score += 20
 
         if energy_gate:
-            tremor_score += 25
+            tremor_score += 20
 
         if stability_gate:
-            tremor_score += 25
+            tremor_score += 15
 
-        if rms_motion < 5:
+        if coherence_gate:
+            tremor_score += 10
+
+        if dominance_gate:
+            tremor_score += 15
+
+        if rms_motion < 1.0:
             tremor_score = 0
 
         if mean_energy_ratio < 0.20:
             tremor_score = max(
                 0,
-                tremor_score - 25
+                tremor_score - 20
             )
 
-        if tremor_score >= 75:
+        if not rest_gate:
+            tremor_score = max(
+                0,
+                tremor_score - 20
+            )
+
+        if (
+            not motion_gate or
+            not frequency_gate or
+            not stability_gate
+        ):
+            tremor_score = min(tremor_score, 40)
+
+        if tremor_score >= 70:
 
             self.persistence = min(
                 self.persistence + 1,
@@ -282,12 +337,15 @@ class RealtimeTremorDetector:
         else:
 
             self.persistence = max(
-                self.persistence - 1,
+                self.persistence - 2,
                 0
             )
 
         tremor_detected = (
-            self.persistence >= 3
+            self.persistence >= 4 and
+            motion_gate and
+            frequency_gate and
+            stability_gate
         )
 
         self.total_windows += 1
@@ -303,11 +361,24 @@ class RealtimeTremorDetector:
 
         confidence = min(
             100,
-            int(
-                mean_energy_ratio * 50 +
-                (25 if frequency_gate else 0) +
-                (25 if stability_gate else 0)
-            )
+            int(tremor_score)
+        )
+
+        if tremor_score < 50:
+            severity = "NONE"
+        elif tremor_score < 75:
+            severity = "MILD"
+        elif tremor_score < 90:
+            severity = "MODERATE"
+        else:
+            severity = "SEVERE"
+
+        print(
+            f"DEBUG | RMS={rms_motion:.2f} "
+            f"Freq={mean_freq:.2f} "
+            f"Band={mean_energy_ratio:.3f} "
+            f"Score={tremor_score} "
+            f"Persist={self.persistence}"
         )
 
         return {
@@ -325,7 +396,10 @@ class RealtimeTremorDetector:
                 mean_energy_ratio,
 
             "best_axis":
-                best_axis,
+                max(
+                    [("gx", energy_per_axis[0]), ("gy", energy_per_axis[1]), ("gz", energy_per_axis[2])],
+                    key=lambda x: x[1]
+                )[0],
 
             "motion_gate":
                 motion_gate,
@@ -338,6 +412,15 @@ class RealtimeTremorDetector:
 
             "stability_gate":
                 stability_gate,
+
+            "coherence_gate":
+                coherence_gate,
+
+            "dominance_gate":
+                dominance_gate,
+
+            "rest_gate":
+                rest_gate,
 
             "tremor_score":
                 tremor_score,
@@ -352,5 +435,17 @@ class RealtimeTremorDetector:
                 confidence,
 
             "tremor_burden":
-                tremor_burden
+                tremor_burden,
+
+            "rest_index":
+                rest_index,
+
+            "axis_coherence":
+                axis_coherence,
+
+            "axis_dominance":
+                dominance,
+
+            "severity":
+                severity
         }

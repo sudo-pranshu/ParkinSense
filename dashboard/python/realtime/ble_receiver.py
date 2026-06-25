@@ -121,6 +121,9 @@ def notification_handler(sender, data):
         ])
 
         detector.add_sample(
+            ax,
+            ay,
+            az,
             gx,
             gy,
             gz
@@ -139,11 +142,23 @@ def notification_handler(sender, data):
                     "frequency_std": float(result["frequency_std"]),
                     "band_ratio": float(result["band_ratio"]),
                     "best_axis": result["best_axis"],
+
+                    "rest_index": float(result["rest_index"]),
+                    "axis_coherence": float(result["axis_coherence"]),
+                    "axis_dominance": float(result["axis_dominance"]),
+
                     "tremor_score": int(result["tremor_score"]),
                     "confidence": int(result["confidence"]),
                     "persistence": int(result["persistence"]),
                     "tremor_burden": float(result["tremor_burden"]),
-                    "classification": "TREMOR" if result["tremor_detected"] else "NO TREMOR",
+
+                    "severity": result["severity"],
+
+                    "classification":
+                        "TREMOR"
+                        if result["tremor_detected"]
+                        else "NO TREMOR",
+
                     "sample_count": int(sample_count),
                     "packet_count": int(packet_count)
                 }
@@ -163,6 +178,11 @@ def notification_handler(sender, data):
                 )
 
                 print(
+                    f"RMS Motion: "
+                    f"{result['rms_motion']:.2f}"
+                )
+
+                print(
                     f"Frequency Std Dev: "
                     f"{result['frequency_std']:.2f} Hz"
                 )
@@ -177,6 +197,56 @@ def notification_handler(sender, data):
                     f"{result['best_axis']}"
                 )
 
+                print(
+                    f"Rest Index: "
+                    f"{result['rest_index']:.3f}"
+                )
+
+                print(
+                    f"Axis Coherence: "
+                    f"{result['axis_coherence']:.2f}"
+                )
+
+                print(
+                    f"Axis Dominance: "
+                    f"{result['axis_dominance']:.2f}"
+                )
+
+                print(
+                    f"Motion Gate: "
+                    f"{result['motion_gate']}"
+                )
+
+                print(
+                    f"Frequency Gate: "
+                    f"{result['frequency_gate']}"
+                )
+
+                print(
+                    f"Energy Gate: "
+                    f"{result['energy_gate']}"
+                )
+
+                print(
+                    f"Stability Gate: "
+                    f"{result['stability_gate']}"
+                )
+
+                print(
+                    f"Coherence Gate: "
+                    f"{result['coherence_gate']}"
+                )
+
+                print(
+                    f"Dominance Gate: "
+                    f"{result['dominance_gate']}"
+                )
+
+                print(
+                    f"Rest Gate: "
+                    f"{result['rest_gate']}"
+                )
+
                 print()
 
                 print(
@@ -187,6 +257,11 @@ def notification_handler(sender, data):
                 print(
                     f"Confidence: "
                     f"{result['confidence']}%"
+                )
+
+                print(
+                    f"Severity: "
+                    f"{result['severity']}"
                 )
 
                 print(
