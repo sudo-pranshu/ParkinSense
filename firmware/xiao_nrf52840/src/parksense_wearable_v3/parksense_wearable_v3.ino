@@ -50,15 +50,22 @@ void setup()
 
 void loop()
 {
-    if (!ppg.update())
+    if (millis() - lastSample < 10)
     {
         return;
     }
 
-    Serial.print("IR : ");
+    lastSample = millis();
+
+    ppg.update();
+
+    Serial.print("IR: ");
     Serial.print(ppg.getIR());
-    Serial.print("    RED : ");
+
+    Serial.print("   RED: ");
     Serial.print(ppg.getRed());
-    Serial.print("    Finger : ");
-    Serial.println(ppg.fingerDetected());
+
+    Serial.print("   Finger: ");
+
+    Serial.println(ppg.fingerDetected() ? "YES" : "NO");
 }

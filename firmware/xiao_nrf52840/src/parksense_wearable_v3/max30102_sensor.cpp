@@ -36,17 +36,9 @@ bool MAX30102Sensor::begin()
 
 bool MAX30102Sensor::update()
 {
-    sensor.check();
+    ir = sensor.getIR();
 
-    if (!sensor.available())
-    {
-        return false;
-    }
-
-    red = sensor.getFIFORed();
-    ir  = sensor.getFIFOIR();
-
-    sensor.nextSample();
+    red = sensor.getRed();
 
     finger = ir > FINGER_THRESHOLD;
 
