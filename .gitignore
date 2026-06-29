@@ -20,3 +20,5 @@ env/
 # Build artifacts
 build/
 dist/
+realtime_capture*.csv
+realtime_metrics*.json
