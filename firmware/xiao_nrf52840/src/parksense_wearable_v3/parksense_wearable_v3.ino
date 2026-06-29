@@ -1,22 +1,55 @@
 /*
-==========================================================
+=========================================================
 ParkinSense Wearable V3
-
-Milestone 1
-
-MAX30102 Validation Firmware
-==========================================================
+IMU + MAX30102 + BLE Streaming
+=========================================================
 */
 
 #include <Arduino.h>
 #include <Wire.h>
-
+#include <bluefruit.h>
 #include "config.h"
+#include "packet.h"
+#include "imu_sensor.h"
 #include "max30102_sensor.h"
 
+// ----------------------------------------------------
+// Sensors
+// ----------------------------------------------------
+
+IMUSensor imu;
 MAX30102Sensor ppg;
 
-uint32_t lastSample = 0;
+// ----------------------------------------------------
+// BLE
+// ----------------------------------------------------
+
+BLEService wearableService(BLE_SERVICE_UUID);
+
+BLECharacteristic wearableCharacteristic(
+    BLE_CHARACTERISTIC_UUID,
+    BLENotify,
+    sizeof(WearablePacket)
+);
+
+// ----------------------------------------------------
+// Packet
+// ----------------------------------------------------
+
+WearablePacket packet;
+uint8_t batchIndex = 0;
+
+// ----------------------------------------------------
+// Timing
+// ----------------------------------------------------
+
+uint32_t lastSampleUs  = 0;
+uint32_t sampleCounter = 0;
+uint32_t lastRateReport = 0;
+
+// ----------------------------------------------------
+// Setup
+// ----------------------------------------------------
 
 void setup()
 {
@@ -27,17 +60,24 @@ void setup()
         delay(10);
     }
 
+    Serial.println();
+    Serial.println("=======================================");
+    Serial.println("      ParkinSense Wearable V3");
+    Serial.println("=======================================");
+
+    // -----------------------------
+    // I2C
+    // -----------------------------
+
     Wire.begin();
 
-    Serial.println();
-    Serial.println("====================================");
-    Serial.println("ParkinSense Wearable V3");
-    Serial.println("MAX30102 Validation");
-    Serial.println("====================================");
+    // -----------------------------
+    // IMU
+    // -----------------------------
 
-    if (!ppg.begin())
+    if (!imu.begin())
     {
-        Serial.println("PPG INIT FAILED");
+        Serial.println("IMU FAILED");
 
         while (1)
         {
@@ -45,27 +85,162 @@ void setup()
         }
     }
 
-    lastSample = millis();
+    // -----------------------------
+    // MAX30102
+    // -----------------------------
+
+    if (!ppg.begin())
+    {
+        Serial.println("MAX30102 FAILED");
+
+        while (1)
+        {
+            delay(1000);
+        }
+    }
+
+    // -----------------------------
+    // BLE
+    // -----------------------------
+
+    Bluefruit.configPrphConn(
+        247,    // max MTU
+        247,    // max MTU
+        6,      // event length
+        6       // event length
+    );
+
+    Bluefruit.begin();
+
+    Bluefruit.setTxPower(4);
+
+    Bluefruit.setName(DEVICE_NAME);
+
+    wearableService.begin();
+
+    wearableCharacteristic.begin();
+
+    Bluefruit.Advertising.addService(wearableService);
+
+    Bluefruit.Advertising.addName();
+
+    Bluefruit.Advertising.restartOnDisconnect(true);
+
+    Bluefruit.Advertising.start(0);
+
+    Serial.println();
+    Serial.println("BLE READY");
+    Serial.println("Advertising...");
+
+    lastSampleUs = micros();
 }
+
+// ----------------------------------------------------
+// Main Loop
+// ----------------------------------------------------
 
 void loop()
 {
-    if (millis() - lastSample < 10)
+    uint32_t nowUs = micros();
+
+    if ((nowUs - lastSampleUs) < IMU_SAMPLE_INTERVAL_US)
     {
         return;
     }
 
-    lastSample = millis();
+    lastSampleUs += IMU_SAMPLE_INTERVAL_US;
+
+    // ---------------------------------
+    // Read IMU
+    // ---------------------------------
+
+    imu.update();
+
+    // ---------------------------------
+    // Read MAX30102
+    // ---------------------------------
 
     ppg.update();
 
-    Serial.print("IR: ");
-    Serial.print(ppg.getIR());
+    // ---------------------------------
+    // First sample timestamp
+    // ---------------------------------
 
-    Serial.print("   RED: ");
-    Serial.print(ppg.getRed());
+    if (batchIndex == 0)
+    {
+        packet.header.timestamp_us = micros();
+    }
 
-    Serial.print("   Finger: ");
+    // ---------------------------------
+    // Accelerometer
+    // ---------------------------------
 
-    Serial.println(ppg.fingerDetected() ? "YES" : "NO");
+    packet.samples[batchIndex].ax =
+        (int16_t)(imu.ax() * ACCEL_SCALE);
+
+    packet.samples[batchIndex].ay =
+        (int16_t)(imu.ay() * ACCEL_SCALE);
+
+    packet.samples[batchIndex].az =
+        (int16_t)(imu.az() * ACCEL_SCALE);
+
+    // ---------------------------------
+    // Gyroscope
+    // ---------------------------------
+
+    packet.samples[batchIndex].gx =
+        (int16_t)(imu.gx() * GYRO_SCALE);
+
+    packet.samples[batchIndex].gy =
+        (int16_t)(imu.gy() * GYRO_SCALE);
+
+    packet.samples[batchIndex].gz =
+        (int16_t)(imu.gz() * GYRO_SCALE);
+
+    // ---------------------------------
+    // MAX30102
+    // ---------------------------------
+
+    packet.samples[batchIndex].ir  = ppg.getIR();
+    packet.samples[batchIndex].red = ppg.getRed();
+
+    batchIndex++;
+    sampleCounter++;
+
+    // ---------------------------------
+    // Send BLE Packet
+    // ---------------------------------
+
+    if (batchIndex >= BATCH_SIZE)
+    {
+        if (Bluefruit.connected())
+        {
+            wearableCharacteristic.notify(
+                (uint8_t*)&packet,
+                sizeof(packet)
+            );
+        }
+
+        batchIndex = 0;
+    }
+
+    // ---------------------------------
+    // Diagnostics
+    // ---------------------------------
+
+    if (millis() - lastRateReport >= 1000)
+    {
+        Serial.print("Rate : ");
+        Serial.print(sampleCounter);
+        Serial.print(" Hz");
+        Serial.print(" | Finger : ");
+        Serial.print(ppg.fingerDetected());
+        Serial.print(" | IR : ");
+        Serial.print(ppg.getIR());
+        Serial.print(" | RED : ");
+        Serial.println(ppg.getRed());
+
+        sampleCounter    = 0;
+        lastRateReport   = millis();
+    }
 }
