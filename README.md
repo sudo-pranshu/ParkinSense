@@ -8,7 +8,6 @@
 ![BLE](https://img.shields.io/badge/BLE-104Hz%20Streaming-success)
 ![Pipeline](https://img.shields.io/badge/Pipeline-V2.5-brightgreen)
 ![Dashboard](https://img.shields.io/badge/Dashboard-Live%20Plotly-orange)
-![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 ### Continuous Neurological Monitoring & Digital Biomarker Platform
 
