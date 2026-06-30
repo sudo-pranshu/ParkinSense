@@ -5,6 +5,21 @@
 #include <LSM6DS3.h>
 #include "MAX30105.h"
 
+// =====================
+// DEBUG MACROS
+// =====================
+#define DEBUG_SERIAL 0
+
+#if DEBUG_SERIAL
+  #define DEBUG_BEGIN(...)    Serial.begin(__VA_ARGS__)
+  #define DEBUG_PRINT(...)    Serial.print(__VA_ARGS__)
+  #define DEBUG_PRINTLN(...)  Serial.println(__VA_ARGS__)
+#else
+  #define DEBUG_BEGIN(...)
+  #define DEBUG_PRINT(...)
+  #define DEBUG_PRINTLN(...)
+#endif
+
 Adafruit_FlashTransport_QSPI flashTransport;
 
 // =====================
@@ -69,7 +84,7 @@ BLECharacteristic spo2Char = BLECharacteristic(0x2A8D);
 // =====================
 void initSPO2() {
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
-    Serial.println("SPO2 not found. Will retry later.");
+    DEBUG_PRINTLN("SPO2 not found. Will retry later.");
     spo2Ready = false;
   } else {
     byte ledBrightness = 40;
@@ -79,7 +94,7 @@ void initSPO2() {
     int pulseWidth = 69;
     int adcRange = 4096;
     particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
-    Serial.println("SPO2 OK");
+    DEBUG_PRINTLN("SPO2 OK");
     spo2Ready = true;
   }
 }
@@ -87,10 +102,10 @@ void initSPO2() {
 void initIMU() {
   Wire.setClock(400000); 
   if (myIMU.begin() != 0) {
-    Serial.println("IMU not found. Will retry later.");
+    DEBUG_PRINTLN("IMU not found. Will retry later.");
     imuReady = false;
   } else {
-    Serial.println("IMU OK");
+    DEBUG_PRINTLN("IMU OK");
     imuReady = true;
   }
 }
@@ -121,26 +136,40 @@ void startAdv() {
 
 void connect_callback(uint16_t conn_handle) {
   deviceConnected = true;
-  Serial.println("BLE Connected!");
+  DEBUG_PRINTLN("BLE Connected!");
 }
 
 void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
   deviceConnected = false;
-  Serial.println("BLE Disconnected!");
+  DEBUG_PRINTLN("BLE Disconnected!");
 }
 
 void setup() {
-  Serial.begin(115200);
+  DEBUG_BEGIN(115200);
   
+#if DEBUG_SERIAL
   unsigned long start = millis();
   while (!Serial && (millis() - start < 5000)) {
     delay(10);
   }
+#endif
   
-  Serial.println("\n--- IN SETUP ---");
+  DEBUG_PRINTLN("\n--- IN SETUP ---");
 
   // Power efficiency for nRF52
   NRF_POWER->DCDCEN = 1;
+
+#if !DEBUG_SERIAL
+  // Disable USB when debug is off
+  TinyUSBDevice.detach();
+  delay(100);
+#endif
+
+  // Disable User LED
+#ifdef LED_BUILTIN
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+#endif
 
   // Put QSPI flash to sleep
   flashTransport.begin();
@@ -155,15 +184,19 @@ void setup() {
 
   // BLE init
   Bluefruit.begin();
-  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
+  
+  // Disable Bluefruit Status LED
+  Bluefruit.autoConnLed(false);
+  
   Bluefruit.setName("ParkinSense");
+  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
   setupNRF();
   startAdv();
 
-  Serial.println("Setup complete! BLE Advertising started.");
+  DEBUG_PRINTLN("Setup complete! BLE Advertising started.");
   
   uint32_t now = millis();
   lastImuUs = micros();
@@ -250,7 +283,7 @@ void loop() {
   static uint32_t lastHeartbeat = 0;
   if (!Bluefruit.connected() && (nowMs - lastHeartbeat >= 2000)) {
     lastHeartbeat = nowMs;
-    Serial.println("Advertising... Waiting for BLE connection.");
+    DEBUG_PRINTLN("Advertising... Waiting for BLE connection.");
   }
 
   // --- RECONNECT LOGIC (Every 10 Seconds) ---
@@ -258,11 +291,11 @@ void loop() {
     lastReconnectMs = nowMs;
     
     if (!spo2Ready) {
-      Serial.println("Attempting SPO2 Reconnect...");
+      DEBUG_PRINTLN("Attempting SPO2 Reconnect...");
       initSPO2();
     }
     if (!imuReady) {
-      Serial.println("Attempting IMU Reconnect...");
+      DEBUG_PRINTLN("Attempting IMU Reconnect...");
       initIMU();
     }
   }
@@ -318,32 +351,32 @@ void loop() {
 
   // --- 3. DEBUG PRINT (Every 5 Seconds) ---
   if (nowMs - lastStatsMs >= 5000) {
-      Serial.println();
-      Serial.println("========== SENSOR & BLE DEBUG ==========");
+      DEBUG_PRINTLN("");
+      DEBUG_PRINTLN("========== SENSOR & BLE DEBUG ==========");
 
-      Serial.print("IMU Hardware Sampling Rate : ");
-      Serial.print(imuSamplesRead / 5.0);
-      Serial.println(" Hz");
+      DEBUG_PRINT("IMU Hardware Sampling Rate : ");
+      DEBUG_PRINT(imuSamplesRead / 5.0);
+      DEBUG_PRINTLN(" Hz");
       
-      Serial.print("IMU BLE Notifications Sent : ");
-      Serial.print(imuPacketsSent);
-      Serial.print("  (Rate: ");
-      Serial.print(imuPacketsSent / 5.0);
-      Serial.println(" Hz)");
+      DEBUG_PRINT("IMU BLE Notifications Sent : ");
+      DEBUG_PRINT(imuPacketsSent);
+      DEBUG_PRINT("  (Rate: ");
+      DEBUG_PRINT(imuPacketsSent / 5.0);
+      DEBUG_PRINTLN(" Hz)");
 
-      Serial.println("----------------------------------------");
+      DEBUG_PRINTLN("----------------------------------------");
 
-      Serial.print("SPO2 Hardware Sampling Rate: ");
-      Serial.print(spo2SamplesRead / 5.0);
-      Serial.println(" Hz");
+      DEBUG_PRINT("SPO2 Hardware Sampling Rate: ");
+      DEBUG_PRINT(spo2SamplesRead / 5.0);
+      DEBUG_PRINTLN(" Hz");
 
-      Serial.print("SPO2 BLE Notifications Sent: ");
-      Serial.print(spo2PacketsSent);
-      Serial.print("  (Rate: ");
-      Serial.print(spo2PacketsSent / 5.0);
-      Serial.println(" Hz)");
+      DEBUG_PRINT("SPO2 BLE Notifications Sent: ");
+      DEBUG_PRINT(spo2PacketsSent);
+      DEBUG_PRINT("  (Rate: ");
+      DEBUG_PRINT(spo2PacketsSent / 5.0);
+      DEBUG_PRINTLN(" Hz)");
 
-      Serial.println("========================================");
+      DEBUG_PRINTLN("========================================");
 
       // Reset counters
       imuSamplesRead  = 0;

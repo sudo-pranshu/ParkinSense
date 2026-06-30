@@ -4,7 +4,7 @@ Motion Processing Pipeline
 """
 
 import numpy as np
-
+from dashboard.python.fusion.ppg_fusion import PPGFusion
 from dashboard.python.filters.gravity import GravityRemoval
 from dashboard.python.filters.notch import NotchFilter
 from dashboard.python.filters.bandpass import ButterworthBandpass
@@ -34,6 +34,8 @@ class MotionPipeline:
         self.context = MotionContext()
 
         self.engine = RuleInferenceEngine()
+        
+        self.ppg = PPGFusion()
 
     def preprocess(self, signal):
 
@@ -44,97 +46,66 @@ class MotionPipeline:
         return signal
 
     def process(
-
         self,
-
         ax,
-
         ay,
-
         az,
-
         gx,
-
         gy,
-
-        gz
-
+        gz,
+        ir=None,
+        red=None
     ):
 
         ax = self.gravity.remove(np.asarray(ax))
-
         ay = self.gravity.remove(np.asarray(ay))
-
         az = self.gravity.remove(np.asarray(az))
 
         context = self.context.classify(
-
             ax,
-
             ay,
-
             az
-
         )
 
         gx = self.preprocess(np.asarray(gx))
-
         gy = self.preprocess(np.asarray(gy))
-
         gz = self.preprocess(np.asarray(gz))
 
         gx_features = self.extractor.extract(gx)
-
         gy_features = self.extractor.extract(gy)
-
         gz_features = self.extractor.extract(gz)
 
         features = {
-
             "gx": gx_features,
-
             "gy": gy_features,
-
             "gz": gz_features
-
         }
 
         result = self.engine.predict(
-
             features,
-
             context
-
+        )
+        
+        ppg = self.ppg.process(
+            ir,
+            red
         )
 
         best = features[result["best_axis"]]
 
         fv = FeatureVector(
-
             rms=best["rms"],
-
             dominant_frequency=best["dominant_frequency"],
-
             band_ratio=best["band_ratio"],
-
             spectral_entropy=best["spectral_entropy"],
-
             spectral_centroid=best["spectral_centroid"],
-
             frequency_std=result["frequency_std"],
-
             axis_agreement=result["axis_agreement"],
-
             axis_dominance=result["axis_dominance"],
-
             best_axis=result["best_axis"],
-
             motion_state=context["state"],
-
             rest_index=result["rest_index"],
-
             features=features
-
         )
 
         result["frequency"]      = float(result["frequency"])
@@ -147,11 +118,8 @@ class MotionPipeline:
         result["confidence"]     = float(result["confidence"])
 
         return {
-
             "feature_vector": fv,
-
             "result": result,
-
-            "context": context
-
+            "context": context,
+            "ppg": ppg
         }
