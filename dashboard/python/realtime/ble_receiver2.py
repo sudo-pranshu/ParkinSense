@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import os
 import struct
 import time
 
@@ -21,20 +22,38 @@ SAMPLE_PERIOD_US = int(1_000_000 / SAMPLE_RATE_HZ)
 
 BATCH_SIZE = 10
 
+HEADER_FORMAT = "<BBHI"
+HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+
+SAMPLE_FORMAT = "<hhhhhhII"
+SAMPLE_SIZE = struct.calcsize(SAMPLE_FORMAT)
+
 packet_count = 0
 sample_count = 0
+firmware_version_logged = False
 
 start_time = time.time()
 
 detector = RealtimeTremorDetector()
 
-METRICS_FILE = "realtime_metrics.json"
+DATA_DIR = "data/raw"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+METRICS_FILE = os.path.join(
+    DATA_DIR,
+    "realtime_metrics.json"
+)
+
+run_timestamp = time.strftime("%Y%m%d_%H%M%S")
+csv_path = os.path.join(DATA_DIR, f"parkinsense_{run_timestamp}.csv")
 
 csv_file = open(
-    "realtime_capture.csv",
+    csv_path,
     "w",
     newline=""
 )
+
+print(f"Recording to: {csv_path}")
 
 writer = csv.writer(csv_file)
 
@@ -47,7 +66,8 @@ writer.writerow([
     "gy",
     "gz",
     "ir",
-    "red"
+    "red",
+    "packet_version"
 ])
 
 
@@ -55,11 +75,10 @@ def notification_handler(sender, data):
 
     global packet_count
     global sample_count
+    global firmware_version_logged
 
-    packet_count += 1
-
-    header_size = 4
-    sample_size = 20  # 6x int16 (12 bytes) + 2x uint32 (8 bytes)
+    header_size = HEADER_SIZE
+    sample_size = SAMPLE_SIZE
 
     expected_size = (
         header_size +
@@ -76,11 +95,27 @@ def notification_handler(sender, data):
 
         return
 
-    packet_timestamp_us = struct.unpack_from(
-        "<I",
+    packet_count += 1
+
+    (
+        version,
+        flags,
+        _,
+        packet_timestamp_us
+    ) = struct.unpack_from(
+        HEADER_FORMAT,
         data,
         0
-    )[0]
+    )
+
+    # NOTE: the current firmware always sets flags=0 (it does not yet
+    # populate imu_valid/ppg_valid/finger_present bits), so those are
+    # intentionally not decoded here. Re-add bit decoding once the
+    # firmware actually sets bit0/bit1/bit2.
+
+    if not firmware_version_logged:
+        print("Firmware Packet Version:", version)
+        firmware_version_logged = True
 
     offset = header_size
 
@@ -96,7 +131,7 @@ def notification_handler(sender, data):
             ir_raw,
             red_raw
         ) = struct.unpack_from(
-            "<hhhhhhII",
+            SAMPLE_FORMAT,
             data,
             offset
         )
@@ -126,7 +161,8 @@ def notification_handler(sender, data):
             gy,
             gz,
             ir,
-            red
+            red,
+            version
         ])
 
         detector.add_sample(
@@ -178,7 +214,9 @@ def notification_handler(sender, data):
                     "dropped_packets": 0,
 
                     "latest_ir": int(ir),
-                    "latest_red": int(red)
+                    "latest_red": int(red),
+
+                    "packet_version": version
                 }
 
                 with open(METRICS_FILE, "w") as f:
@@ -318,7 +356,8 @@ def notification_handler(sender, data):
 
         offset += sample_size
 
-    csv_file.flush()
+    if packet_count % 20 == 0:
+        csv_file.flush()
 
     if packet_count % 10 == 0:
 
@@ -365,6 +404,26 @@ async def main():
 
         print("Connected")
 
+        # In current bleak, .services is populated automatically once
+        # connect() completes (which the async-with above already did),
+        # so this is normally non-None. get_services() is deprecated, but
+        # kept as a fallback for older bleak versions/backends where
+        # discovery timing can differ - avoids the deprecation warning in
+        # the common case while still guarding against the edge case.
+        services = client.services
+        if services is None:
+            services = await client.get_services()
+
+        known_char_uuids = [
+            c.uuid.lower()
+            for s in services
+            for c in s.characteristics
+        ]
+
+        if CHAR_UUID.lower() not in known_char_uuids:
+            print("Characteristic not found.")
+            return
+
         await client.start_notify(
             CHAR_UUID,
             notification_handler
@@ -385,8 +444,11 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
 
-        csv_file.close()
-
         print(
             "\nCapture stopped."
         )
+
+    finally:
+
+        csv_file.flush()
+        csv_file.close()
