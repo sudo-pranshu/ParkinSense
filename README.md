@@ -699,7 +699,7 @@ The current implementation supports simultaneous IMU and optical streaming while
 
 ParkinSense is an open-source research platform intended for educational and experimental purposes.
 
-It is **not** a certified medical device and must not be used for diagnosis, treatment, or clinical decision-making. All outputs — including tremor detection, confidence scores, physiological metrics, and digital biomarkers — are intended solely for research and development.
+It is **not** a certified medical device and must not be used for diagnosis, treatment, or clinical decision-making. All outputs, including tremor detection, confidence scores, physiological metrics, and digital biomarkers, are intended solely for research and development.
 
 Clinical validation with appropriately labeled datasets is required before any medical application.
 
