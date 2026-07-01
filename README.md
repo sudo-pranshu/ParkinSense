@@ -1,417 +1,450 @@
-# ParkinSense
-
 <div align="center">
+
+# 🧠 ParkinSense
 
 ![Status](https://img.shields.io/badge/Status-Active%20Development-success)
 ![Platform](https://img.shields.io/badge/Platform-XIAO%20nRF52840%20Sense-blue)
-![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20IMU-orange)
-![BLE](https://img.shields.io/badge/BLE-100Hz%20Streaming-success)
-![Branch](https://img.shields.io/badge/Branch-V2%20Signal%20Processing-yellow)
-![License](https://img.shields.io/badge/License-MIT-lightgrey)
+![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20IMU%20%2B%20MAX30102-red)
+![BLE](https://img.shields.io/badge/BLE-104Hz%20Streaming-success)
+![Pipeline](https://img.shields.io/badge/Pipeline-V2.5-brightgreen)
+![Dashboard](https://img.shields.io/badge/Dashboard-Live%20Plotly-orange)
 
-### Continuous Neurological Monitoring & Digital Biomarker Platform for Parkinson's Disease
+### Continuous Neurological Monitoring & Digital Biomarker Platform
 
-*A WHOOP-style wearable platform for continuous Parkinson's disease monitoring through inertial sensing, advanced signal processing, digital biomarkers, and longitudinal analytics.*
+*A wearable sensing platform for continuous Parkinson's disease monitoring using inertial sensing, physiological sensing, digital biomarkers, and real-time analytics.*
 
 </div>
 
----
+<br>
 
-## Table of Contents
+## 📑 Table of Contents
 
-- [Overview](#overview)
-- [Development Branches](#development-branches)
-- [System Architecture](#system-architecture)
-- [Signal Processing Pipeline](#signal-processing-pipeline)
-- [Hardware Platform](#hardware-platform)
-- [Firmware](#firmware)
-- [BLE Protocol](#ble-protocol)
-- [Digital Biomarkers](#digital-biomarkers)
-- [Dashboard](#dashboard)
-- [Repository Structure](#repository-structure)
-- [Getting Started](#getting-started)
-  - [Requirements](#requirements)
-  - [Clone Repository](#clone-repository)
-  - [Flash Firmware](#flash-firmware)
-  - [Run the Runtime](#run-the-runtime)
-  - [Launch the Dashboard](#launch-the-dashboard)
-  - [Runtime Output](#runtime-output)
-  - [Troubleshooting](#troubleshooting)
-- [Algorithm: V2 Signal Processing](#algorithm-v2-signal-processing)
-- [Performance](#performance)
-- [Development Roadmap](#development-roadmap)
-- [Research Focus](#research-focus)
-- [Citation](#citation)
-- [Disclaimer](#disclaimer)
+- [Overview](#-overview)
+- [Core Features](#-core-features)
+- [Development Branches](#-development-branches)
+- [System Architecture](#-system-architecture)
+- [Hardware Platform](#-hardware-platform)
+- [Firmware](#-firmware)
+- [BLE Protocol](#-ble-protocol)
+- [Signal Processing Pipeline](#-signal-processing-pipeline)
+- [Physiological Monitoring](#-physiological-monitoring)
+- [Digital Biomarkers](#-digital-biomarkers)
+- [Dashboard](#-dashboard)
+- [Repository Structure](#-repository-structure)
+- [Getting Started](#-getting-started)
+- [Performance](#-performance)
+- [Development Roadmap](#-development-roadmap)
+- [Research Focus](#-research-focus)
+- [Citation](#-citation)
+- [Disclaimer](#%EF%B8%8F-disclaimer)
 
----
+<br>
 
-## Overview
+## 🔭 Overview
 
-ParkinSense is a wearable neurological monitoring platform that transforms raw inertial sensor data from a wrist-worn device into clinically relevant digital biomarkers for Parkinson's disease research.
+ParkinSense is an open-source wearable research platform designed for **continuous neurological monitoring** of Parkinson's disease using wrist-worn sensors.
 
-The platform targets the gap between episodic clinical assessments and continuous real-world monitoring. Where a neurologist's office visit captures a snapshot, ParkinSense captures the full signal — tremor during meals, bradykinesia during morning routines, symptom fluctuation across medication cycles.
+Instead of relying solely on periodic clinical assessments, ParkinSense continuously measures motion and physiological signals throughout everyday activities. The platform combines inertial sensing, optical sensing, digital signal processing, and real-time inference to generate quantitative neurological biomarkers.
 
-**Core capabilities:**
+The project has evolved into a modular wearable platform inspired by modern health wearables such as WHOOP, while remaining focused on Parkinsonian symptom monitoring and biomedical signal analysis.
 
-- Continuous IMU acquisition at 104 Hz via LSM6DS3
-- Stable BLE streaming at ~100 Hz with binary packet protocol
-- Modular, real-time signal processing pipeline (V2)
-- Multi-stage tremor detection with false-positive rejection
-- Confidence-weighted digital biomarker extraction
-- Live analytics dashboard with real-time neurological metrics
+**Current sensing capabilities:**
 
-**Intended use:**
-Research, education, and exploratory prototyping. Not a medical device.
+| | |
+|---|---|
+| 📐 | 6-axis inertial sensing |
+| 💡 | Optical PPG sensing |
+| 📡 | Real-time BLE streaming |
+| 🌊 | Multi-stage tremor detection |
+| 🏃 | Motion-context aware inference |
+| ❤️ | Live physiological monitoring |
+| 📊 | Digital biomarker extraction |
 
----
+<br>
 
-## Development Branches
+## ✨ Core Features
 
-### `main` — Stable V1
+### Motion Monitoring
+- Continuous 104 Hz IMU acquisition
+- LSM6DS3 accelerometer and gyroscope
+- Binary BLE packet streaming
+- Multi-axis tremor detection
+- Motion context classification
+- False-positive rejection
+- Confidence estimation
+- Tremor burden estimation
 
-The stable production branch. Contains the original real-time Parkinson's monitoring platform, validated for demonstrations and stable testing.
+### Physiological Monitoring
+**Current:**
+- MAX30102 optical sensor
+- IR acquisition
+- RED acquisition
+- Finger detection
+- Real-time PPG streaming
 
-**Features:**
-- BLE streaming at ~100 Hz
-- FFT-based tremor detection
-- Realtime Plotly Dash dashboard
-- Digital biomarker extraction (frequency, energy, confidence, burden)
-- Dataset collection framework (7,000+ offline samples, 10,000+ realtime samples)
+**Upcoming:**
+- Heart rate
+- Heart rate variability (RMSSD)
+- SpO₂ estimation
+- Recovery score
+- Sleep analytics
 
----
+### Software Platform
+- Modular V2 signal-processing pipeline
+- Live Plotly Dash dashboard
+- Offline dataset recorder
+- Replay framework
+- Digital biomarker extraction
+- Research-oriented architecture
+- Future ML compatibility
 
-### `feature/v2-signal-processing` — Experimental V2
+<br>
 
-Next-generation signal processing architecture. A full redesign of the analytics pipeline with modular stages, clinical-oriented decision logic, and substantially improved false-positive rejection.
+## 🌳 Development Branches
 
-**Major improvements over V1:**
+### `main`
+**Stable release** — contains the validated V2 neurological monitoring platform.
 
-| Area | V1 | V2 |
-|---|---|---|
-| Architecture | Monolithic FFT pipeline | Modular staged pipeline |
-| Filtering | None | Gravity removal + notch + Butterworth band-pass |
-| Motion context | None | REST / LOW MOTION / ACTIVE classification |
-| Tremor detection | Single-axis FFT magnitude | Multi-axis spectral analysis |
-| False positive rejection | Persistence filter only | RMS gate + band ratio gate + ACTIVE penalty + temporal smoother |
-| Confidence | Simple score product | Independent `ConfidenceEstimator` with multi-factor penalties |
-| Temporal validation | Window counter | Persistence state machine (5-of-10 windows) |
-| Analysis window | Sliding | Rolling 4-second buffer |
+- Stable BLE streaming
+- V2 motion pipeline
+- Real-time dashboard
+- Offline analytics
+- Dataset recorder
 
-**V2 current status:**
+### `feature/v2-signal-processing`
+Development branch used during the redesign of the signal-processing architecture.
 
-```
-Stable realtime execution        ✅
-Reduced stationary false pos.    ✅
-Improved tremor specificity      ✅
-V2 runtime operational           ✅
-```
+| Area | Previous | Current |
+|------|----------|---------|
+| Pipeline | FFT only | Modular |
+| Filters | None | Gravity + Notch + Band-pass |
+| Motion Detection | None | REST / LOW MOTION / ACTIVE |
+| Detector | Single axis | Multi-axis |
+| Confidence | Basic | Independent estimator |
+| Validation | Sliding window | Temporal smoother |
+| Runtime | Legacy | Runtime V2 |
 
-**V2.2 upcoming (vector-magnitude branch):**
+### `feature/v2-max30102` 🔧 *current*
+Adds complete physiological sensing to the wearable platform.
 
-- Vector magnitude analysis (combined-PSD approach replacing per-axis best-pick)
-- PSD quality metrics
-- Harmonic detection
-- Adaptive thresholds
-- Signal-to-noise estimation
+**Current additions:**
 - MAX30102 integration
-- Bradykinesia biomarkers
-- Activity recognition
-- Sleep and recovery analytics
-- Machine learning inference
+- Binary packet upgrade
+- IR streaming
+- RED streaming
+- Finger detection
+- PPG Fusion module
+- Unified runtime
+- Updated dashboard
 
----
+**Upcoming:**
+- Heart rate · HRV · SpO₂ · Recovery metrics · Sleep analytics
 
-## System Architecture
+<br>
 
-### V1 Architecture
-
-```
-Wearable Device
-      │
-      ▼
-BLE Streaming
-      │
-      ▼
-FFT Processing
-      │
-      ▼
-Digital Biomarkers
-      │
-      ▼
-Dashboard
-```
-
-### V2 Architecture
+## 🏗️ System Architecture
 
 ```
-Wearable Device
-        │
-        ▼
-  LSM6DS3 IMU
-        │
-        ▼
-  104 Hz Acquisition
-        │
-        ▼
-  BLE Streaming
-        │
-        ▼
-  Rolling Window Buffer (4 s)
-        │
-        ▼
-  Gravity Removal
-        │
-        ▼
-  50 Hz Notch Filter
-        │
-        ▼
-  Butterworth Band-pass Filter
-        │
-        ▼
-  Motion Context Detection
-   (REST / LOW MOTION / ACTIVE)
-        │
-        ▼
-  Feature Extraction
-   (RMS, dominant freq, band ratio,
-    spectral entropy, centroid, ZCR)
-        │
-        ▼
-  Multi-axis Tremor Detection
-        │
-        ▼
-  Confidence Estimation
-        │
-        ▼
-  Rule-based Inference Engine
-        │
-        ▼
-  Temporal Smoother
-        │
-        ▼
-  Tremor State Machine
-        │
-        ▼
-  Digital Biomarkers
-        │
-        ▼
-  Realtime Dashboard
+                   Wearable Device
+                          │
+          ┌───────────────┴───────────────┐
+          │                                │
+          ▼                                ▼
+     LSM6DS3 IMU                      MAX30102
+          │                                │
+          └───────────────┬────────────────┘
+                           │
+                           ▼
+                  Binary BLE Packet
+                           │
+                           ▼
+                    Runtime V2
+                           │
+        ┌──────────────────┴──────────────────┐
+        │                                      │
+        ▼                                      ▼
+ Motion Processing Pipeline               PPG Fusion
+        │                                      │
+        └──────────────────┬───────────────────┘
+                            ▼
+                  Digital Biomarkers
+                            │
+                            ▼
+                 Plotly Dash Dashboard
 ```
 
----
+<br>
 
-## Signal Processing Pipeline
+## 🔌 Hardware Platform
 
-### Stage 1 — Gravity Removal
-
-Subtracts the static gravity component from the accelerometer signal to isolate dynamic motion.
-
-### Stage 2 — 50 Hz Notch Filter
-
-Removes 50 Hz mains interference present in electrically noisy environments. Applied to both accelerometer and gyroscope channels.
-
-### Stage 3 — Butterworth Band-pass Filter
-
-Isolates the physiologically relevant frequency band. Attenuates sub-1 Hz postural drift and high-frequency mechanical noise above the tremor band.
-
-### Stage 4 — Motion Context Detection
-
-Classifies each analysis window as one of:
-
-| State | Description |
-|---|---|
-| `REST` | Wrist is stationary; tremor detection fully active |
-| `LOW MOTION` | Minor movement; detection active with reduced confidence |
-| `ACTIVE` | Intentional wrist movement; 40-point score penalty applied |
-
-### Stage 5 — Feature Extraction
-
-Per-axis features extracted from each 4-second window:
-
-| Feature | Description |
-|---|---|
-| RMS | Signal energy in deg/s |
-| Dominant Frequency | Spectral peak within 1–15 Hz |
-| Band Ratio | Power in 4–6.5 Hz / total power |
-| Spectral Entropy | Frequency distribution uniformity |
-| Spectral Centroid | Power-weighted mean frequency |
-| Zero Crossing Rate | Oscillation regularity |
-
-### Stage 6 — Multi-axis Tremor Detection (`MultiAxisDetector`)
-
-Evaluates spectral features across all three gyroscope axes. Applies a gyro RMS hard gate to immediately reject sensor noise and desk vibrations, then scores on four independent criteria:
-
-| Criterion | Threshold | Score |
-|---|---|---|
-| Frequency in 4.0–6.5 Hz band | ✓ | +35 |
-| Band ratio > 0.18 | ✓ | +30 |
-| Axis agreement > 0.85 | ✓ | +20 |
-| Axis dominance > 0.50 | ✓ | +20 |
-| ACTIVE motion | ✓ | −40 |
-| Gyro RMS < 0.8 deg/s | ✓ | Hard gate → score = 0 |
-
-Tremor declared at score ≥ 80.
-
-> **V2.2 note:** The next revision replaces per-axis best-pick with a combined-PSD vector approach (`PSD_gx + PSD_gy + PSD_gz`), eliminating orientation sensitivity and the frequency-folding artefact introduced by computing FFT on `|omega| = sqrt(gx² + gy² + gz²)`.
-
-### Stage 7 — Confidence Estimation (`ConfidenceEstimator`)
-
-Independent confidence score from 0–100, distinct from the tremor detection score. Penalizes:
-
-- Unstable dominant frequency (std > 1.2 Hz → ×0.5)
-- Weak tremor-band energy (band ratio < 0.20 → ×0.5)
-- Active motion state (×0.6)
-
-### Stage 8 — Temporal Smoother (`TemporalSmoother`)
-
-10-window rolling smoother. Tremor confirmed only when ≥ 5 of the last 10 windows score ≥ 80. Eliminates single-window transient detections.
-
-### Stage 9 — Tremor State Machine
-
-Hysteretic state machine governing TREMOR_ONSET and TREMOR_RESOLVED transitions to prevent rapid switching at the detection boundary.
-
----
-
-## Hardware Platform
-
-### Wearable Unit
+### Wearable Device
 
 | Component | Specification |
-|---|---|
+|------------|----------------|
 | MCU | Seeed Studio XIAO nRF52840 Sense |
-| IMU | LSM6DS3 (6-axis accelerometer + gyroscope) |
-| Connectivity | Bluetooth Low Energy 5.0 |
-| Interface | USB-C |
-| Power | Li-Ion battery support |
+| IMU | SparkFun LSM6DS3 |
+| Optical Sensor | MAX30102 |
+| BLE | Bluetooth Low Energy 5.0 |
+| Battery | 3.7 V 700 mAh Li-ion (902035) |
+| Charging | USB-C |
+| Expansion | I²C |
 
 ### Operating Configuration
 
 | Parameter | Value |
-|---|---|
-| Gyro ODR | 104 Hz |
-| Accel ODR | 104 Hz |
-| BLE Streaming Rate | ~100 Hz |
-| BLE MTU | 247 bytes |
-| Batch Size | 10 samples |
-| Packet Size | 124 bytes |
-| Analysis Window | 4 seconds (416 samples) |
+|------------|--------|
+| Accelerometer ODR | 104 Hz |
+| Gyroscope ODR | 104 Hz |
+| BLE Streaming | ~104 Hz |
+| BLE MTU | 247 Bytes |
+| Samples / Packet | 10 |
+| Packet Size | 248 Bytes |
+| Analysis Window | 4 seconds |
+| Runtime | Continuous |
 
----
+<br>
 
-## Firmware
+## 🧩 Firmware
 
-The firmware runs on the XIAO nRF52840 Sense and performs:
+The wearable firmware is built around a modular architecture separating sensing, packet generation, and BLE communication.
 
-1. LSM6DS3 initialization at 104 Hz ODR
-2. Interrupt-driven IMU sample acquisition
-3. Batch assembly (10 samples per packet)
-4. Binary packet encoding with timestamp header
-5. BLE notification dispatch
+**Responsibilities:**
+1. Initialize LSM6DS3
+2. Initialize MAX30102
+3. Sample IMU at 104 Hz
+4. Sample optical sensor
+5. Assemble binary packet
+6. Timestamp samples
+7. Stream packets over BLE
+8. Monitor sensor availability
+9. Battery-powered operation
 
-Firmware location: `firmware/xiao_nrf52840/`
+The firmware supports simultaneous inertial and optical acquisition without affecting BLE throughput.
 
----
+**Location:** `firmware/xiao_nrf52840/`
 
-## BLE Protocol
+<br>
 
-### Packet Structure
+## 📡 BLE Protocol
 
-```
-┌──────────────────────────────────────────┐
-│  Header                                  │
-│    Timestamp       (uint32, 4 bytes)     │
-├──────────────────────────────────────────┤
-│  IMU Samples × 10                        │
-│    Accel X/Y/Z    (int16 × 3, 6 bytes)  │
-│    Gyro  X/Y/Z    (int16 × 3, 6 bytes)  │
-│    ─────────────────────────────         │
-│    Per sample: 12 bytes                  │
-│    Total payload: 120 bytes              │
-├──────────────────────────────────────────┤
-│  Total packet: 124 bytes                 │
-└──────────────────────────────────────────┘
-```
-
-### Transport
-
-- Service: Custom BLE GATT service
-- Characteristic: Notify
-- Connection interval: negotiated for ~100 Hz throughput
-
----
-
-## Digital Biomarkers
-
-| Biomarker | Description | Unit |
-|---|---|---|
-| Tremor Frequency | Dominant oscillation frequency | Hz |
-| Tremor Score | Composite detection score | 0–100 |
-| Tremor Confidence | Detection quality estimate | 0–100 |
-| Tremor Severity | Categorical severity label | NONE / VERY MILD / MILD / MODERATE / HIGH / SEVERE |
-| Tremor Persistence | Windows in tremor state (last 10) | count |
-| Tremor Burden | % of monitoring windows in tremor | % |
-| Motion State | Wrist activity context | REST / LOW MOTION / ACTIVE |
-| Band Ratio | Tremor-band power fraction | 0–1 |
-| Axis Agreement | Cross-axis frequency coherence | 0–1 |
-| Rest Index | Inverse motion RMS (wrist stillness) | 0–1 |
-
----
-
-## Dashboard
-
-The real-time analytics dashboard is built with Plotly Dash and consumes the live BLE stream.
-
-**Visualizations:**
-- Live gyroscope waveforms (X / Y / Z)
-- Real-time tremor score gauge
-- Dominant frequency tracker
-- Confidence and persistence indicators
-- Tremor burden time series
-- Motion state indicator
-- Device connection status
-
-**Architecture:**
+Each BLE notification contains one complete sensor packet.
 
 ```
-BLE Receiver (ble_receiver.py)
-        │
-        ▼
-Realtime CSV (realtime_capture.csv)
-        │
-        ▼
-Metrics Engine (realtime_tremor.py)
-        │
-        ▼
-Plotly Dash Dashboard (realtime_dashboard.py)
+┌─────────────────────────────────────┐
+│ Header                               │
+│   Version   (1B)                     │
+│   Flags     (1B)                     │
+│   Reserved  (2B)                     │
+│   Timestamp (4B)                     │
+├─────────────────────────────────────┤
+│ 10 × Samples                         │
+│   Acc X · Acc Y · Acc Z              │
+│   Gyro X · Gyro Y · Gyro Z           │
+│   IR · RED                           │
+└─────────────────────────────────────┘
 ```
 
----
+**Header**
 
-## Repository Structure
+| Field | Type |
+|--------|------|
+| Version | uint8 |
+| Flags | uint8 |
+| Reserved | uint16 |
+| Timestamp | uint32 |
 
-The repository is organized into modular components separating firmware, signal processing, realtime analytics, inference, and future wearable capabilities. Each module has a dedicated responsibility, making the system easier to maintain, extend, and validate.
+**Per sample**
+
+| Signal | Type |
+|----------|------|
+| Acc X / Y / Z | int16 |
+| Gyro X / Y / Z | int16 |
+| IR | uint32 |
+| RED | uint32 |
+
+> The versioned packet format allows future additions while maintaining backward compatibility between firmware and runtime.
+
+<br>
+
+## 🔬 Signal Processing Pipeline
+
+The V2 pipeline is built as a sequence of independent processing stages. Each module has a single responsibility, allowing algorithms to be validated, replaced, or extended without affecting the rest of the system.
+
+```
+Raw BLE Packet
+      │
+      ▼
+Packet Decoder
+      │
+      ▼
+Rolling Buffer (4s)
+      │
+      ├────────────── IMU ──────────────┐
+      │                                 │
+      ▼                                 ▼
+Gravity Removal                   PPG Fusion
+      │                                 │
+50 Hz Notch Filter                Finger Detection
+      │                                 │
+Butterworth Band-pass             IR / RED Processing
+      │                                 │
+Feature Extraction                Future HR / SpO₂
+      │                                 │
+Motion Context                    Physiological Features
+      │                                 │
+Rule Engine                       Future Fusion
+      │                                 │
+Temporal Validation                     │
+      └───────────────┬─────────────────┘
+                       ▼
+              Digital Biomarkers
+                       ▼
+              Realtime Dashboard
+```
+
+### Stage 1 — Packet Decoding
+Incoming BLE notifications are decoded into structured sensor samples: timestamp, accelerometer, gyroscope, IR, RED, packet version, and status flags.
+
+### Stage 2 — Rolling Buffer
+Sensor samples accumulate into a rolling 4-second analysis window.
+
+> Stable FFT resolution · Better frequency estimation · Reduced variance · Lower false positives
+
+### Stage 3 — Gravity Removal
+The gravity component is removed from the accelerometer using a low-pass estimator — separating static orientation from motion, improving motion-context classification, and removing postural bias.
+
+### Stage 4 — Notch Filtering
+A digital 50 Hz notch filter suppresses mains interference in electrically noisy environments. Applied to both gyroscope and accelerometer.
+
+### Stage 5 — Butterworth Band-pass
+Signals are filtered into the Parkinsonian tremor band: **4.0 Hz – 6.5 Hz**.
+
+> Removes slow drift · Removes high-frequency vibration · Improves SNR
+
+### Stage 6 — Motion Context
+`MotionContext` classifies each window into:
+
+| State | Description |
+|---------|------------|
+| `REST` | Stationary wrist |
+| `LOW MOTION` | Small voluntary movement |
+| `ACTIVE` | Intentional movement |
+
+Motion state is used by the detector to suppress false positives.
+
+### Stage 7 — Feature Extraction
+The `FeatureExtractor` computes biomarkers from each gyroscope axis:
+
+RMS · Dominant Frequency · Band Ratio · Spectral Entropy · Spectral Centroid · Zero Crossing Rate · Peak Magnitude · Frequency Stability
+
+*Planned:* Spectral Flatness · Harmonic Ratio · PSD Quality · Signal-to-Noise Ratio
+
+### Stage 8 — Multi-axis Tremor Detection
+Instead of analyzing a single axis, the detector evaluates all three gyroscope axes simultaneously.
+
+| Feature | Score |
+|----------|------|
+| Frequency in tremor band | +35 |
+| Band ratio | +30 |
+| Axis agreement | +20 |
+| Axis dominance | +20 |
+| ACTIVE penalty | −40 |
+| RMS gate | Immediate rejection |
+
+Tremor is declared when **Score ≥ 80**.
+
+### Stage 9 — Confidence Estimation
+Confidence is computed independently of the tremor score, and is reduced when dominant frequency varies, tremor band energy is weak, or wrist motion is excessive. A window can therefore be classified as Tremor with low confidence, or No Tremor with high confidence.
+
+### Stage 10 — Temporal Validation
+A rolling 10-window history requires **5 positive windows** before confirming tremor, removing transient detections caused by sudden motion.
+
+### Stage 11 — State Machine
+The detector uses hysteresis to avoid rapidly switching between states:
+
+```
+NO TREMOR → POSSIBLE → CONFIRMED → RECOVERY → NO TREMOR
+```
+
+<br>
+
+## ❤️ Physiological Monitoring
+
+ParkinSense includes an optical sensing subsystem using the MAX30102.
+
+**Current functionality:** IR acquisition · RED acquisition · Finger detection · BLE transmission · Runtime decoding · Dashboard visualization
+
+The current implementation focuses on validating the hardware and data pipeline before physiological analytics are introduced.
+
+### PPG Fusion Module
+The PPG Fusion layer acts as the interface between the optical sensor and the analytics pipeline.
+
+**Current:** IR validation · RED validation · Finger detection · Sensor availability
+
+**Future:** Heart rate estimation · Heart rate variability · Respiratory rate · SpO₂ estimation · Recovery metrics · Signal quality estimation · Motion artifact rejection
+
+<br>
+
+## 📊 Digital Biomarkers
+
+| Biomarker | Description |
+|-----------|-------------|
+| Tremor Score | Composite detector output |
+| Tremor Frequency | Dominant oscillation |
+| Confidence | Detector certainty |
+| Tremor Severity | Severity category |
+| Motion State | Activity context |
+| Tremor Burden | Long-term percentage |
+| Band Ratio | Tremor band energy |
+| Axis Agreement | Cross-axis consistency |
+| Axis Dominance | Dominant tremor axis |
+| Rest Index | Wrist stillness metric |
+| Finger Detection | Optical sensor status |
+| IR Signal | Raw infrared intensity |
+| RED Signal | Raw red intensity |
+
+*Future:* Heart Rate · HRV · SpO₂ · Recovery Score · Sleep Quality · Bradykinesia Index · Dyskinesia Index · Medication Response · Longitudinal Symptom Burden
+
+<br>
+
+## 📺 Dashboard
+
+The dashboard provides real-time visualization of all computed biomarkers, refreshing automatically every 100 ms while remaining synchronized with the runtime metrics.
+
+**Current components:** Live Gyroscope · Tremor Score Gauge · Motion State · Confidence · Severity · Tremor Burden · Dominant Frequency · Band Ratio · IR Signal · RED Signal · Finger Detection · Axis Information
+
+**Coming soon:** Heart Rate · HRV · SpO₂ · Recovery · Sleep Analytics · Battery Status
+
+<br>
+
+## 📁 Repository Structure
 
 ```
 ParkinSense
 │
 ├── firmware/
-│   └── xiao_nrf52840/
 │
 ├── dashboard/
 │   └── python/
 │       ├── analytics/
+│       ├── calibration/
 │       ├── context/
 │       ├── dashboard/
 │       ├── data/
+│       ├── dataset/
 │       ├── detector/
+│       ├── detectors/
 │       ├── features/
 │       ├── filters/
+│       ├── fusion/
 │       ├── inference/
+│       ├── models/
+│       ├── pipeline/
 │       ├── pipelines/
 │       ├── realtime/
+│       ├── replay/
 │       ├── runtime/
-│       └── tests/
+│       └── utils/
 │
 ├── docs/
 ├── hardware/
@@ -419,519 +452,266 @@ ParkinSense
 └── README.md
 ```
 
----
+The repository is intentionally modular to support rapid algorithm development while maintaining separation between firmware, analytics, and future machine-learning components.
 
-### `firmware/`
+<br>
 
-All embedded firmware running on the Seeed Studio XIAO nRF52840 Sense.
+## 🚀 Getting Started
 
-- IMU initialization and LSM6DS3 configuration
-- Sensor sampling and timestamp generation
-- Binary packet creation and BLE notification dispatch
-- Future: MAX30102 integration, battery management
-
----
-
-### `dashboard/python/`
-
-Complete realtime analytics framework running on the host computer. Handles everything after BLE packets are received.
-
----
-
-#### `filters/`
-
-Signal preprocessing modules. Remove unwanted components before any neurological analysis is performed.
-
-| File | Purpose |
-|---|---|
-| `gravity.py` | Low-pass gravity removal for linear acceleration extraction |
-| `notch.py` | 50 Hz digital notch filter — removes mains electrical interference |
-| `bandpass.py` | Butterworth band-pass filter, passband 4.0–6.5 Hz (Parkinsonian tremor band) |
-
----
-
-#### `features/`
-
-Quantitative biomarker extraction from filtered sensor signals.
-
-| File | Purpose |
-|---|---|
-| `feature_extractor.py` | Core engine computing RMS, dominant frequency, band ratio, spectral entropy, centroid, zero crossings, signal energy, peak prominence, and more |
-| `feature_vector.py` | Standardizes extracted features into a structured vector for downstream inference and future ML compatibility |
-
----
-
-#### `context/`
-
-Determines the current movement context of the user.
-
-| File | Purpose |
-|---|---|
-| `motion_context.py` | Classifies wrist activity as REST, LOW MOTION, or ACTIVE using acceleration magnitude and motion RMS; prevents false positives during voluntary movement |
-
----
-
-#### `detector/`
-
-Neurological decision engine.
-
-| File | Purpose |
-|---|---|
-| `multiaxis_detector.py` | Primary tremor detection algorithm; combines gyroscope axes, applies hard RMS gate, scores on frequency / band energy / axis agreement / axis dominance criteria; tremor declared at score ≥ 80 |
-| `confidence.py` | Independent confidence estimator (0–100); penalizes weak band energy, unstable frequency, and active motion |
-| `temporal.py` | Rolling 10-window smoother; confirms tremor only when ≥ 5 windows score ≥ 80, eliminating transient detections |
-| `state_machine.py` | Finite state machine with states NO_TREMOR → POSSIBLE_TREMOR → CONFIRMED_TREMOR → RECOVERY; reduces flickering and models tremor progression |
-
----
-
-#### `inference/`
-
-Final decision-making layer.
-
-| File | Purpose |
-|---|---|
-| `rule_engine.py` | Combines extracted features with motion context to produce final neurological inference; intended to be replaced or augmented by ML inference in a future phase |
-
----
-
-#### `pipelines/`
-
-End-to-end analytics orchestration.
-
-| File | Purpose |
-|---|---|
-| `motion_pipeline.py` | Central V2 processing pipeline; sequences gravity removal → notch → band-pass → motion context → feature extraction → rule engine → temporal validation → state machine → feature vector |
-
----
-
-#### `runtime/`
-
-Current V2 realtime runtime.
-
-| File | Purpose |
-|---|---|
-| `runtime_v2.py` | Main V2 entry point; manages BLE connection, packet decoding, rolling window buffer, pipeline execution, JSON/CSV logging, console output, and dashboard communication |
-
----
-
-#### `realtime/`
-
-Legacy V1 realtime implementation, retained for backward compatibility and comparison.
-
-| File | Purpose |
-|---|---|
-| `ble_receiver.py` | BLE packet receiver |
-| `realtime_tremor.py` | Original FFT-based tremor detector (V1) |
-| `realtime_capture.csv` | Live capture log |
-| `realtime_metrics.json` | Live metrics output |
-
----
-
-#### `dashboard/`
-
-Visualization layer.
-
-| File | Purpose |
-|---|---|
-| `realtime_dashboard.py` | Interactive Plotly Dash dashboard; displays live gyroscope signals, tremor score, confidence, dominant frequency, motion state, classification, and digital biomarkers |
-
----
-
-#### `analytics/`
-
-Offline research utilities for FFT analysis, algorithm development, dataset evaluation, and performance comparison against V1.
-
----
-
-#### `data/`
-
-Recorded sensor datasets.
-
-Current datasets:
-- Stationary baseline
-- Normal daily motion
-- Walking
-- Simulated Parkinsonian tremor
-- External vibration reference
-
-Future datasets: clinical recordings, medication response sessions, long-term wearable monitoring.
-
----
-
-#### `tests/`
-
-Validation scripts for individual modules. Covers filters, feature extraction, motion context, detector, state machine, and the full motion pipeline. Run before deploying changes to the realtime runtime.
-
----
-
-### `docs/`
-
-Architecture diagrams, design notes, system documentation, and development logs.
-
----
-
-### `hardware/`
-
-Hardware design resources. Future contents: PCB layouts, enclosure CAD models, wiring diagrams, sensor placement guides, battery integration.
-
----
-
-### `research/`
-
-Reference material: Parkinson's disease literature, signal processing references, clinical notes, benchmark datasets, and algorithm comparisons used during development.
-
-
----
-
-## Getting Started
-
-This section walks through building, flashing, running, and monitoring the ParkinSense platform from scratch.
-
----
+This guide walks through setting up the complete ParkinSense platform, from flashing the wearable firmware to visualizing live neurological and physiological biomarkers.
 
 ### Requirements
 
-#### Hardware
+**Hardware**
 
-| Component | Notes |
-|---|---|
-| Seeed Studio XIAO nRF52840 Sense | Current supported board |
-| USB-C cable | For flashing and power |
-| Computer with BLE support | For receiving sensor stream |
-| MAX30102 PPG sensor | Future — not currently required |
-| Li-ion battery + enclosure | Future — not currently required |
+| Component | Purpose |
+|------------|----------|
+| Seeed Studio XIAO nRF52840 Sense | Main wearable MCU |
+| SparkFun LSM6DS3 | 6-axis IMU |
+| MAX30102 | Optical PPG sensor |
+| 3.7 V 700 mAh Li-ion Battery (902035) | Portable power supply |
+| USB-C Cable | Programming and charging |
+| BLE-enabled Computer | Runtime and dashboard |
 
-#### Software
-
-- Arduino IDE 2.x
+**Software**
 - Python 3.11+
+- Arduino IDE 2.x
 - Git
-
-Install Python dependencies:
 
 ```bash
 pip install numpy scipy pandas matplotlib plotly dash bleak pyqtgraph
 ```
 
----
-
-### Clone Repository
+### Clone the Repository
 
 ```bash
 git clone https://github.com/sudo-pranshu/ParkinSense.git
 cd ParkinSense
 ```
 
-**Branch selection:**
+### Select Branch
 
 ```bash
-# Stable V1
-git checkout main
-
-# Experimental V2 signal processing
-git checkout feature/v2-signal-processing
-
-# Check current branch
+git checkout feature/v2-max30102
 git branch
 ```
 
----
-
-### Flash Firmware
-
-**1. Open Arduino IDE and navigate to:**
-
+Expected output:
 ```
-firmware/xiao_nrf52840/xiao_nrf52840.ino
+* feature/v2-max30102
 ```
 
-**2. Install required libraries via Library Manager:**
+### Flash the Firmware
 
-| Library | Purpose |
-|---|---|
-| Adafruit TinyUSB | USB stack |
-| Adafruit Bluefruit nRF52 | BLE |
-| SparkFun LSM6DS3 | IMU driver |
-| Wire | I2C |
-
-**3. Select the board:**
-
+Open Arduino IDE and navigate to:
 ```
-Tools → Board → Seeed XIAO nRF52840 Sense
+firmware/xiao_nrf52840/src/parksense_wearable_v3/
 ```
 
-**4. Select the correct COM / serial port, then click Upload.**
+Install required libraries:
+- Adafruit Bluefruit nRF52
+- Adafruit TinyUSB
+- SparkFun LSM6DS3
+- SparkFun MAX3010x
+- Wire
 
-**5. Verify via Serial Monitor at 115200 baud:**
+Select **Board → Seeed XIAO nRF52840 Sense**, choose the correct serial port, then click **Upload**.
 
+**Expected serial output:**
 ```
 ParkinSense Initializing...
-IMU Ready
+
+Initializing IMU...
+✓ IMU Ready
+
+Initializing MAX30102...
+✓ MAX30102 Ready
+
+Battery Connected
 BLE Advertising...
 Waiting for Connection...
 ```
 
-> If upload fails: double-press the RESET button, re-select the board and port, and try again.
-
----
-
 ### Run the Runtime
-
-Open a terminal in the repository root:
 
 ```bash
 python -m dashboard.python.runtime.runtime_v2
 ```
 
-Expected output on connection:
-
+Expected output:
 ```
 Searching for ParkinSense...
 Connected
 Streaming...
+
 ========== PARKINSENSE V2 ==========
 ```
 
-The runtime automatically creates:
-
-```
-dashboard/python/realtime/realtime_capture_v2.csv
-dashboard/python/realtime/realtime_metrics_v2.json
-```
-
-`realtime_capture_v2.csv` records every sample with timestamp and full IMU data (AccX/Y/Z, GyroX/Y/Z). These recordings are used for offline analysis, dataset generation, and algorithm validation.
-
----
+The runtime automatically generates `realtime_capture_v2.csv` and `realtime_metrics_v2.json`.
 
 ### Launch the Dashboard
 
-Open a **second terminal** in the repository root:
-
 ```bash
-python dashboard/python/dashboard/realtime_dashboard.py
+python dashboard/python/dashboard/realtime_dashboard_v2.py
 ```
 
-Then open your browser at:
-
-```
-http://127.0.0.1:8050
-```
-
-The dashboard displays live gyroscope waveforms, tremor score, confidence, dominant frequency, motion state, severity classification, and all digital biomarkers in real time.
-
----
+Open **http://127.0.0.1:8050** — the dashboard updates continuously while the wearable is streaming.
 
 ### Complete Workflow
 
 ```
-Flash Firmware
-      |
-      v
-Power Device
-      |
-      v
-BLE Advertising
-      |
-      v
-run runtime_v2.py    <------------------+
-      |                                 |
-      v                                 |
-Realtime Processing                     |
-      |                             Collect Data /
-      v                            Validate Algorithm /
-JSON + CSV Generation              Improve Detector
-      |                                 |
-      v                                 |
-Launch Dashboard ---------------------> +
-      |
-      v
-Live Monitoring
+Flash Firmware → Power Wearable → BLE Advertising → Runtime V2
+       → Packet Decoder → Motion Pipeline → PPG Fusion
+       → Digital Biomarkers → Dashboard
 ```
 
----
-
-### Runtime Output
-
-The console prints a status block after each analysis window:
+### Sample Runtime Output
 
 ```
 ========== PARKINSENSE V2 ==========
 
-State      : NO TREMOR
-Score      : 18 / 100
-Confidence : 91%
-Frequency  : 5.12 Hz
-Motion     : REST
+State          : NO TREMOR
+Score          : 14 / 100
+Confidence     : 96 %
+Frequency      : 5.18 Hz
+Severity       : NONE
+Motion         : REST
+Best Axis      : GY
+IR             : 91243
+RED            : 61871
+Finger         : YES
+
+=====================================
 ```
-
-To stop acquisition safely, press `CTRL + C`. The runtime flushes the CSV and closes the BLE connection before exiting.
-
----
 
 ### Troubleshooting
 
-| Symptom | Check |
-|---|---|
-| Device not found | BLE advertising? Firmware uploaded? Bluetooth enabled on host? |
-| Dashboard not updating | `runtime_v2.py` running? `realtime_metrics_v2.json` being written? |
-| Sampling rate below 104 Hz | Close other BLE apps; reduce wireless interference; reconnect |
-| Firmware upload fails | Double-press RESET; re-select board and port; retry |
-| Dashboard shows stale data | Restart both runtime and dashboard; confirm JSON path matches |
+| Problem | Solution |
+|----------|----------|
+| Device not found | Ensure BLE is enabled and firmware is running |
+| Dashboard not updating | Verify `runtime_v2.py` is running |
+| No IMU data | Check LSM6DS3 wiring |
+| No PPG values | Verify MAX30102 SDA/SCL connections |
+| Finger always NO | Place finger completely over sensor |
+| Runtime crashes | Confirm Python dependencies are installed |
+| BLE disconnects | Restart runtime and reconnect |
 
+<br>
 
----
-
-## Algorithm: V2 Signal Processing
-
-### Preprocessing
-
-Gravity removal isolates the dynamic component of acceleration. A 50 Hz notch filter removes mains interference. A Butterworth band-pass filter isolates the physiologically relevant band, attenuating postural drift and high-frequency noise.
-
-### Motion Context
-
-Each 4-second window is classified as REST, LOW MOTION, or ACTIVE based on accelerometer RMS. ACTIVE windows receive a 40-point scoring penalty to suppress false positives during intentional movement.
-
-### Feature Extraction
-
-Per-axis spectral features are computed from the windowed gyroscope signal: RMS energy, dominant frequency from the FFT peak, tremor-band power ratio, spectral entropy, centroid, and zero crossing rate.
-
-### Decision Engine
-
-The multi-axis detector applies a hard gyro RMS gate (< 0.8 deg/s → immediate rejection) before scoring. Four independent spectral criteria contribute to a composite score; tremor is declared at score ≥ 80. The confidence estimator runs separately and penalizes detections with weak band energy or unstable frequency.
-
-### Temporal Validation
-
-The temporal smoother requires ≥ 5 of the last 10 analysis windows to score ≥ 80 before confirming tremor. This eliminates transient single-window detections. A hysteretic state machine governs TREMOR_ONSET and TREMOR_RESOLVED transitions.
-
-### Realtime Output
-
-Each window produces: tremor state, score, confidence, severity, dominant frequency, frequency stability, band ratio, axis agreement, motion state, and rest index.
-
----
-
-## Performance
+## ⚡ Performance
 
 | Metric | Value |
-|---|---|
-| Sampling Rate | 104 Hz |
-| BLE Streaming | ~100 Hz |
-| Analysis Window | 4 seconds |
-| Processing Latency | < 100 ms (post-window) |
-| Runtime | Realtime |
-| False Positive Rejection | Substantially improved over V1 (ongoing validation) |
-| Tremor Threshold | Score ≥ 80 (5-of-10 window persistence) |
+|----------|---------|
+| IMU Sampling | 104 Hz |
+| BLE Streaming | ~104 Hz |
+| Analysis Window | 4 s |
+| Packet Size | 248 Bytes |
+| Runtime Latency | <100 ms after analysis window |
+| Dashboard Refresh | 100 ms |
+| Runtime | Continuous |
 
-> Clinical sensitivity and specificity figures are not reported. Formal evaluation against a labelled clinical dataset is required before quantitative performance claims. See [Disclaimer](#disclaimer).
+The current implementation supports simultaneous IMU and optical streaming while maintaining stable BLE throughput.
 
----
+<br>
 
-## Development Roadmap
+## 🗺️ Development Roadmap
 
-### Phase 1 — Sensor Acquisition ✅
-- [x] LSM6DS3 IMU integration
-- [x] BLE streaming at 104 Hz
-- [x] Binary packet protocol
-- [x] Realtime CSV logging
-- [x] Dataset collection framework
+**Phase 1 — Hardware**
+- [x] LSM6DS3 Integration
+- [x] MAX30102 Integration
+- [x] BLE Streaming
+- [x] Battery-powered Operation
 
-### Phase 2 — Signal Processing ✅
-- [x] FFT tremor analysis (V1)
-- [x] Tremor Detector V3 / V4
-- [x] Modular V2 pipeline (gravity removal, notch, band-pass)
-- [x] Motion context detection
-- [x] Feature extraction pipeline
-- [x] Multi-axis tremor detector
-- [x] Confidence estimator
-- [x] Temporal smoother
+**Phase 2 — Signal Processing**
+- [x] Gravity Removal
+- [x] Notch Filter
+- [x] Butterworth Band-pass
+- [x] Motion Context
+- [x] Feature Extraction
+- [x] Multi-axis Detector
+- [x] Confidence Estimation
+- [x] Temporal Validation
+- [x] State Machine
 
-### Phase 3 — Digital Biomarkers ✅
-- [x] Tremor frequency
-- [x] Tremor score
-- [x] Tremor confidence
-- [x] Tremor persistence
-- [x] Tremor burden
-- [x] Motion state
+**Phase 3 — Physiological Monitoring**
+- [x] IR Acquisition
+- [x] RED Acquisition
+- [x] Finger Detection
+- [ ] Heart Rate
+- [ ] HRV
+- [ ] SpO₂
 
-### Phase 4 — V2.2 Vector Magnitude (In Progress)
-- [ ] Combined-PSD vector detector
-- [ ] PSD quality metrics
-- [ ] Harmonic detection
-- [ ] Adaptive thresholds
-- [ ] Signal-to-noise estimation
+**Phase 4 — Digital Biomarkers**
+- [x] Tremor Frequency
+- [x] Tremor Score
+- [x] Confidence
+- [x] Motion Context
+- [x] Tremor Burden
+- [x] Rest Index
 
-### Phase 5 — Wearable Platform
-- [x] BLE streaming
-- [x] Realtime detection
-- [x] Realtime dashboard
-- [ ] Battery optimization
-- [ ] Wearable enclosure
-- [ ] Mobile dashboard
+**Phase 5 — Wearable Platform**
+- [x] Rechargeable Li-ion Operation
+- [x] Live Dashboard
+- [x] Runtime V2
+- [x] BLE Packet Versioning
+- [ ] Battery Monitoring
+- [ ] Power Optimization
+- [ ] Mobile Companion App
 
-### Phase 6 — Advanced Biomarkers
-- [ ] MAX30102 integration (heart rate + SpO2)
-- [ ] Bradykinesia assessment
-- [ ] Activity classification
-- [ ] Sleep and recovery analytics
-- [ ] HRV monitoring
+**Phase 6 — Machine Learning**
+- [ ] Adaptive Thresholds
+- [ ] Personalized Models
+- [ ] Activity Recognition
+- [ ] Bradykinesia Detection
+- [ ] Dyskinesia Detection
+- [ ] Long-term Progression Analysis
 
-### Phase 7 — Clinical Validation
-- [ ] Expanded dataset collection
-- [ ] Labelled clinical ground truth
-- [ ] Biomarker validation
-- [ ] Sensitivity / specificity analysis
-- [ ] Pilot studies
+<br>
 
-### Phase 8 — Machine Learning
-- [ ] ML-based tremor classifier
-- [ ] Personalized adaptive thresholds
-- [ ] Longitudinal anomaly detection
-- [ ] Disease progression modelling
+## 🔍 Research Focus
 
----
+- Parkinsonian rest tremor
+- Digital biomarkers
+- Wearable neurological monitoring
+- Continuous disease tracking
+- Motion artifact rejection
+- Physiological signal fusion
+- Biomedical signal processing
+- Edge AI for wearables
 
-## Research Focus
+<br>
 
-- Parkinsonian rest tremor detection from wrist-worn inertial sensors
-- Tremor burden estimation and longitudinal tracking
-- Digital biomarker development for continuous neurological monitoring
-- False-positive rejection in unconstrained daily-life settings
-- Wearable system design for neurological applications
-- Comparison of threshold-based vs. ML-based tremor classifiers
-
----
-
-## Citation
-
-If you use ParkinSense in academic work, please cite as:
+## 📖 Citation
 
 ```bibtex
-@misc{parkinsense2025,
-  author       = {Kumar, Pranshu},
-  title        = {ParkinSense: Continuous Neurological Monitoring \& Digital Biomarker Platform for Parkinson's Disease},
-  year         = {2025},
-  howpublished = {\url{https://github.com/notpranshu/ParkinSense}},
-  note         = {Open-source research prototype}
+@misc{parkinsense2026,
+  author       = {Pranshu Kumar},
+  title        = {ParkinSense: Continuous Neurological Monitoring and Digital Biomarker Platform},
+  year         = {2026},
+  howpublished = {\url{https://github.com/sudo-pranshu/ParkinSense}},
+  note         = {Open-source wearable neurological monitoring platform}
 }
 ```
 
----
+<br>
 
-## Disclaimer
+## ⚠️ Disclaimer
 
-ParkinSense is a research and educational project developed as part of an undergraduate engineering programme.
+ParkinSense is an open-source research platform intended for educational and experimental purposes.
 
-**This platform is not a certified medical device.** It must not be used for clinical diagnosis, treatment planning, or medical decision-making of any kind.
+It is **not** a certified medical device and must not be used for diagnosis, treatment, or clinical decision-making. All outputs, including tremor detection, confidence scores, physiological metrics, and digital biomarkers, are intended solely for research and development.
 
-All outputs — including tremor scores, severity labels, biomarkers, and analytics — are intended solely for research, educational, and exploratory purposes. No clinical accuracy claims are made or implied.
-
-For Parkinson's disease assessment, consult a qualified neurologist.
+Clinical validation with appropriately labeled datasets is required before any medical application.
 
 ---
 
 <div align="center">
 
-**ParkinSense &nbsp;·&nbsp; Realtime Neurological Monitoring &nbsp;·&nbsp; Digital Biomarkers &nbsp;·&nbsp; Parkinson's Disease Research**
+### ParkinSense
+**Continuous Neurological Monitoring & Digital Biomarker Platform**
 
-*VJTI Mumbai &nbsp;·&nbsp; Electronics & Telecommunication Engineering*
+Developed by **Pranshu Kumar**
+
+*Wearable Computing • Biomedical Signal Processing • Digital Health • Parkinson's Disease Research*
 
 </div>
