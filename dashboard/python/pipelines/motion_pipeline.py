@@ -4,7 +4,7 @@ Motion Processing Pipeline
 """
 
 import numpy as np
-from dashboard.python.fusion.ppg_fusion import PPGFusion
+from dashboard.python.ppg.ppg_processor import PPGProcessor
 from dashboard.python.filters.gravity import GravityRemoval
 from dashboard.python.filters.notch import NotchFilter
 from dashboard.python.filters.bandpass import ButterworthBandpass
@@ -35,7 +35,7 @@ class MotionPipeline:
 
         self.engine = RuleInferenceEngine()
         
-        self.ppg = PPGFusion()
+        self.ppg = PPGProcessor()
 
     def preprocess(self, signal):
 
