@@ -1,14 +1,14 @@
 #include <Arduino.h>
 #include <bluefruit.h>
 #include <Wire.h>
-#include “LSM6DS3.h”
+#include "LSM6DS3.h"
 
 LSM6DS3 imu(I2C_MODE, 0x6A);
 
 // ParkinSense BLE Service
-BLEService imuService(“ABCD1234-0000-467A-9538-01F0652C74E0”);
+BLEService imuService("ABCD1234-0000-467A-9538-01F0652C74E0");
 BLECharacteristic imuChar(
-“ABCD1234-0001-467A-9538-01F0652C74E0”,
+"ABCD1234-0001-467A-9538-01F0652C74E0",
 BLENotify,
 244
 );

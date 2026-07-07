@@ -26,10 +26,10 @@
   Sampling
 ----------------------------------------------------------*/
 
-constexpr uint32_t IMU_SAMPLE_RATE_HZ = 104;
-constexpr uint32_t IMU_SAMPLE_INTERVAL_US = 9615;
+constexpr uint32_t IMU_SAMPLE_RATE_HZ        = 100;
+constexpr uint32_t IMU_SAMPLE_INTERVAL_US    = 10000;  // 1,000,000 / 100 Hz
 
-constexpr uint32_t PPG_SAMPLE_RATE_HZ = 100;
+constexpr uint32_t PPG_SAMPLE_RATE_HZ        = 100;
 
 /*----------------------------------------------------------
   BLE
@@ -55,11 +55,17 @@ constexpr float GYRO_SCALE  = 131.0f;
 
 constexpr uint8_t MAX_LED_BRIGHTNESS = 0x1F;
 
-constexpr uint8_t MAX_SAMPLE_AVERAGE = 4;
+// sampleAverage=1: chip outputs every ADC conversion directly.
+// With sampleAverage=4 the FIFO output rate = sampleRate/4, which
+// caused getIR()/getRed() to block up to 40 ms per call → ~13 Hz.
+constexpr uint8_t MAX_SAMPLE_AVERAGE = 1;  // FIX: was 4
 
 constexpr uint8_t MAX_LED_MODE = 2;      // RED + IR
 
-constexpr uint16_t MAX_SAMPLE_RATE = 100;
+// Internal ADC rate. With sampleAverage=1, FIFO output = sampleRate.
+// Use 400 Hz internally so the FIFO always has a fresh sample ready
+// when our 100 Hz loop calls update().
+constexpr uint16_t MAX_SAMPLE_RATE = 400;  // FIX: was 100 (too tight with avg=4)
 
 constexpr uint16_t MAX_PULSE_WIDTH = 411;
 
