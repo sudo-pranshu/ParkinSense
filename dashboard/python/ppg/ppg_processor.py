@@ -23,7 +23,7 @@ from collections import deque
 
 import numpy as np
 
-from algorithms import (
+from .algorithms import (
     assess_finger_presence,
     classify_sensor_status,
     compute_hrv_metrics,

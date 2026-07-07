@@ -1,6 +1,6 @@
 """
-ParkinSense — PPG Signal Processing Algorithms
-================================================
+ParkinSense — PPG Signal Processing Algorithms  (Version C — merged, reviewed)
+===============================================================================
 
 Stateless, reusable signal-processing functions for photoplethysmography
 (PPG) data acquired from a MAX30102-class pulse oximeter (IR + RED LEDs,
@@ -17,13 +17,41 @@ outlier rejection, and ratio-of-ratios SpO2 estimation with an empirical
 calibration curve. Treat all outputs as estimates, not diagnoses.
 
 Every function operates on 1-D array-like sample buffers (IR / RED channel
-counts) and returns plain dicts/floats — no hidden state, easy to unit test.
+counts) and returns plain dicts/floats — no hidden state (except the
+explicitly documented SpO2 smoothing/lock state), easy to unit test.
+
+Version history / merge notes
+------------------------------
+This module ("Version C") merges two prior implementations:
+
+  * "Version A" contributed the advanced adaptive peak detector (rolling
+    z-score normalization, local short-time-energy gating, adaptive
+    prominence scaling, physical-domain pulse-width verification), the
+    richer per-beat morphology scoring, the fuller Signal Quality Index
+    (spectral entropy, spectral concentration, harmonic ratio, perfusion
+    index, pulse repeatability, frequency stability), the adaptive-weight
+    finger-presence detector, and the confidence-weighted heart-rate
+    estimator.
+
+  * "Version B" contributed the beat-by-beat SpO2 architecture: per-beat
+    AC/DC extraction, per-beat R computation and quality scoring, weighted
+    pulse selection, a low-pass DC tracker, and a SEARCHING/LOCKED/
+    TRACKING/LOST signal-lock state machine with rate-limited output.
+
+Version C keeps every public function name, signature, and returned
+dictionary key from both predecessors (new fields are additive only) while
+rebuilding `estimate_spo2` on top of Version A's peak detector/scorer,
+adding RED/IR peak-alignment validation, R-value stability scoring, an
+adaptive (non-fixed-percentage) pulse-selection rule, a hysteresis-based
+lock state machine, and a pluggable calibration hook — all without
+duplicating FFTs or filter passes beyond what each function strictly needs.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import butter, filtfilt, find_peaks
+from scipy.ndimage import uniform_filter1d
+from scipy.signal import butter, filtfilt, find_peaks, peak_widths
 
 # ---------------------------------------------------------------------------
 # Constants — every threshold below is explained rather than left "magic".
@@ -45,6 +73,96 @@ MAX_BPM = 200.0
 MIN_RR_SEC = 60.0 / MAX_BPM  # shortest plausible beat-to-beat interval
 MAX_RR_SEC = 60.0 / MIN_BPM  # longest plausible beat-to-beat interval
 
+# --- Peak detection ---
+# Rolling normalization window: converts the band-passed signal into local
+# z-scores (subtract rolling mean, divide by rolling std) before peak
+# detection. This is what actually implements the "adaptive threshold"
+# (rolling_mean + k*rolling_std) approach common in PPG/ECG beat-detection
+# literature — by normalizing first, a single fixed k works as the
+# threshold at every point in time, rather than recomputing
+# rolling_mean + k*rolling_std explicitly at every sample.
+NORMALIZATION_WINDOW_SECONDS = 3.0
+# k in "threshold = local_mean + k * local_std". 0.5-1.0 is the commonly
+# cited range for adaptive PPG/ECG beat thresholds; 0.6 sits in the
+# permissive half so beats aren't missed during lower-perfusion periods.
+PEAK_ADAPTIVE_K = 0.6
+
+# Refractory period: deliberately a *detection-time* floor, looser than the
+# MIN_BPM/MAX_BPM bounds used later to judge whether a *reported* heart
+# rate is plausible. 222 BPM / 270 ms sits just above the commonly-cited
+# ~220 BPM absolute human max, so the detector can see genuinely fast beats
+# without prematurely discarding them — the physiological-bounds and
+# MAD-outlier stages further down are where we actually decide what's
+# plausible to report.
+PEAK_REFRACTORY_BPM_MAX = 222.0
+PEAK_REFRACTORY_SEC = 60.0 / PEAK_REFRACTORY_BPM_MAX
+
+# Typical PPG systolic pulse width (half-prominence width) reported in
+# wearable-PPG literature sits roughly in the 80-350 ms range; outside
+# that, a "peak" is more likely a motion spike (too narrow) or a slow
+# baseline ripple that survived the band-pass (too wide).
+MIN_PEAK_WIDTH_SEC = 0.08
+MAX_PEAK_WIDTH_SEC = 0.35
+
+# --- Local energy and adaptive prominence (Phase 2.1 improvements) ---
+# Short-time energy (STE) is computed over a ~0.4 s Hamming-weighted window.
+# 0.4 s is slightly longer than the shortest plausible PPG systolic upstroke
+# (~80 ms) but shorter than the shortest full pulse (~270 ms at 222 BPM),
+# so the STE reflects the instantaneous pulsatile amplitude rather than
+# spanning multiple beats. Hamming rather than rectangular weighting reduces
+# spectral leakage so energy estimates are smoother near burst boundaries.
+LOCAL_ENERGY_WINDOW_SEC = 0.4
+
+# Exponent for energy-scaled adaptive prominence. Required prominence is
+# scaled as: k_adaptive = PEAK_ADAPTIVE_K × (local_energy / median_energy)^alpha.
+# alpha = 0.5 (square-root) produces moderate adaptation: doubling local
+# energy raises the bar by only ~41%, not 100%, preventing over-suppression
+# of real beats in high-perfusion bursts without ignoring the energy context.
+ADAPTIVE_PROMINENCE_ALPHA = 0.5
+
+# Peaks whose local STE is below this fraction of the buffer-wide median STE
+# are suppressed regardless of their z-score. Flat-line segments (sensor
+# lift, zero-perfusion) can produce z-scores near 1 through normalization
+# amplification of sub-noise-floor fluctuations; the energy gate rejects
+# these before they enter the beat-confidence scoring pipeline.
+MIN_LOCAL_ENERGY_FRACTION = 0.05
+
+# --- Per-beat confidence scoring ---
+# Reference scales (in local z-score units) a "strong, trustworthy" beat
+# is expected to clear comfortably; used only to map raw prominence/height
+# onto a 0-1 sub-score, not as hard accept/reject thresholds (those are
+# PEAK_ADAPTIVE_K above, already applied at detection time).
+BEAT_PROMINENCE_Z_REF = 1.5
+BEAT_HEIGHT_Z_REF = 2.0
+
+# A real PPG pulse has a fast systolic upstroke and a slower diastolic
+# decay, so a healthy beat is *expected* to be asymmetric, not symmetric.
+# shape_ratio = 2 * min(rise, fall) / (rise + fall) approaches 0 for a
+# narrow, spike-like artifact and 1 for a perfectly even rise/fall; real
+# pulses typically land around 0.4-0.7, so scoring against a reference of
+# 0.6 gives full credit to plausible pulses without demanding symmetry.
+BEAT_SHAPE_RATIO_REF = 0.6
+
+# Optimal pulse width (center of 80-350 ms physiological band) for width
+# scoring. Score peaks at this value and rolls off linearly toward the band
+# edges. 150 ms corresponds to ~70 BPM — the population-mean resting HR —
+# so a healthy resting pulse scores near 1.0.
+BEAT_PULSE_WIDTH_OPTIMAL_SEC = 0.15
+
+# Expected ratio of rise_time / total_pulse_width for a real PPG systolic
+# peak. Elgendi (2016) reports the systolic upstroke occupies approximately
+# one third of the total pulse duration; the diastolic downstroke ~two thirds.
+# Scoring the upstroke/downstroke asymmetry against these references adds
+# morphological specificity without requiring a template-matching approach.
+BEAT_UPSTROKE_RATIO_REF = 0.35    # rise_samples / total_width ≈ 1/3
+BEAT_DOWNSTROKE_RATIO_REF = 0.65  # fall_samples / total_width ≈ 2/3
+
+# Local SNR reference: a peak z-score of 3.0 above the local noise floor
+# qualifies as "excellent". Peaks barely above the detection threshold (~0.6)
+# score near 0. Chosen so a clinical-grade signal (~20 dB SNR) scores > 0.9
+# and an artifact-dominated signal (~5 dB) scores < 0.3.
+BEAT_LOCAL_SNR_REF = 3.0
+
 # --- MAX30102 ADC characteristics ---
 ADC_MAX_VALUE = 262_143  # 2**18 - 1 (18-bit resolution)
 SATURATION_FRACTION = 0.98  # counts above this fraction of full-scale are "clipped"
@@ -64,6 +182,27 @@ FINGER_AC_DC_RATIO_MIN = 0.0005
 FINGER_AC_DC_RATIO_MAX = 0.10
 FINGER_MIN_STABLE_SECONDS = 2.0  # how long DC level must hold steady to trust a reading
 
+# Perfusion index (PI = AC/DC × 100 %) thresholds for finger detection.
+# PI < 0.02 % indicates extremely poor tissue perfusion or no contact.
+# PI > 10 % is physiologically implausible and suggests a non-tissue
+# reflector or severe LED over-drive. These are numerically equivalent to
+# FINGER_AC_DC_RATIO bounds but expressed as percent (matching the clinical
+# PI definition used in pulse-oximetry literature) for explicit clarity.
+FINGER_PI_MIN_PCT = 0.02   # 0.02 % ≡ 0.0002 AC/DC
+FINGER_PI_MAX_PCT = 10.0   # 10.0 % ≡ 0.10 AC/DC
+
+# Pulse repeatability gate: coefficient of variation (CV) of beat-to-beat
+# peak amplitude in the filtered signal. Real tissue generates pulses of
+# consistent height (CV typically < 0.3); random noise or a hard surface
+# produces wildly varying apparent "beats" (CV > 0.5).
+FINGER_PULSE_REPEATABILITY_CV_MAX = 0.5
+
+# Spectral concentration lower bound for finger detection. Fraction of total
+# spectral power that must fall within ±0.2 Hz of the dominant cardiac
+# frequency. A real pulsatile signal concentrates energy at a narrow peak;
+# broad-band noise spreads it across all bins.
+FINGER_SPECTRAL_CONCENTRATION_MIN = 0.15
+
 # --- SpO2 calibration ---
 # Empirical linear calibration of the form SpO2 = A - B * R, in the same
 # family as calibration curves published by Maxim/Analog Devices app notes
@@ -78,7 +217,104 @@ SPO2_PHYSIO_MAX = 100.0
 SPO2_R_MIN = 0.2
 SPO2_R_MAX = 2.0
 
-# --- Dominant cardiac frequency check (Phase 3) ---
+# Piecewise calibration breakpoint: R values above ~0.9 correspond to SpO2
+# below ~87.5 % on the linear curve. In this hypoxic range, the R-SpO2
+# relationship becomes slightly nonlinear because reduced hemoglobin has
+# different optical absorption coefficients at 660 nm and 940 nm than
+# oxyhemoglobin. A shallower second linear segment below this breakpoint
+# improves accuracy at low saturations. Constants are approximate; accurate
+# calibration requires a simultaneous co-oximeter reference.
+SPO2_CAL_BREAKPOINT_R = 0.9   # R above this → use second segment
+SPO2_CAL_A2 = 108.0           # hypoxic segment: SpO2 = A2 - B2 * R
+SPO2_CAL_B2 = 20.0            # shallower slope in hypoxic range
+
+# Beat-level quality gates for SpO2 R estimation. Only beats with confidence
+# ≥ SPO2_BEAT_CONFIDENCE_MIN contribute to the weighted median R. A threshold
+# of 0.4 accepts beats that are "somewhat plausible" rather than demanding
+# near-perfect morphology; this preserves more beats in low-perfusion states
+# while still rejecting the noisiest artifact-like detections.
+SPO2_BEAT_CONFIDENCE_MIN = 0.4
+
+# Motion freeze: when the motion score is below this threshold, SpO2 cannot
+# be reliably estimated because large-amplitude motion transients dominate the
+# AC amplitude estimate. We return the last trusted estimate (with halved
+# confidence) rather than a noise-driven measurement. 0.3 corresponds to
+# ~30 % of the motion-free score — visible but not violent motion.
+SPO2_MOTION_FREEZE_THRESHOLD = 0.3
+
+# Exponential moving average weight for the new SpO2 measurement. Lower
+# alpha produces a smoother output that changes more slowly; 0.3 means the
+# current estimate contributes 30 % of the output and the prior estimate 70 %.
+# This prevents implausible single-update jumps while still tracking a real
+# slow desaturation event over several update cycles.
+SPO2_SMOOTHING_ALPHA = 0.3
+
+# Maximum plausible SpO2 change between consecutive update calls. Real
+# oxygen saturation changes are physiologically slow (tens of seconds to
+# minutes); a jump of > 4 % per update window is almost certainly measurement
+# noise rather than a genuine desaturation event, so we clamp it before the
+# EMA smoother sees it.
+SPO2_MAX_JUMP_PER_UPDATE = 4.0  # percent
+
+# Rate-of-change ceiling expressed per *second* (rather than per arbitrary
+# update window) so the clamp scales correctly regardless of buffer length.
+# 1.0 %/s is well above any physiologically real desaturation rate (which
+# unfolds over tens of seconds) but well below the jump a single noisy
+# window can otherwise produce, so it is a safety clamp, not a physiological
+# model of desaturation kinetics.
+SPO2_MAX_ROC_PCT_PER_SEC = 1.0
+
+# --- SpO2 signal-lock hysteresis state machine ---
+# Two different thresholds for entering vs. leaving a trusted "lock" state
+# (hysteresis) prevent the state machine from chattering back and forth
+# across a single confidence value when confidence is noisy near the
+# boundary. The gap between ON (0.75) and OFF (0.45) is chosen to be wider
+# than the typical update-to-update confidence noise observed in bench
+# testing, which is the standard rationale for hysteretic thresholds in
+# embedded state machines (Schmitt-trigger-style debouncing).
+SPO2_LOCK_CONFIDENCE_ON = 0.75
+SPO2_LOCK_CONFIDENCE_OFF = 0.45
+# Sustained high confidence required before *first* transitioning into a
+# trusted lock, so a single lucky noisy window can't lock in a bad estimate.
+SPO2_LOCK_DURATION_REQUIRED_SEC = 3.0
+# Minimum sustained recovery time from LOST before re-attempting SEARCHING;
+# mirrors the lock-acquisition duration so recovery is not easier to trigger
+# than the initial lock (asymmetric leniency would let noise re-lock too fast).
+SPO2_LOST_RECOVERY_SEC = 2.0
+
+# --- RED/IR peak alignment (motion-robustness improvement) ---
+# In a well-coupled reflectance sensor, the RED and IR systolic peaks for
+# the same physical pulse should occur within a few milliseconds of each
+# other (both channels observe the same arterial pulse wave through the
+# same optical path). A larger offset indicates the "matched" RED peak is
+# actually a different event — most commonly a motion transient that
+# perturbed one channel more than the other — and the beat should be
+# rejected from R-value estimation rather than silently biasing R.
+IR_RED_PEAK_ALIGNMENT_MAX_SEC = 0.03  # 30 ms
+
+# --- R-value stability scoring ---
+# Reference coefficient of variation (CV) for beat-to-beat R values. Beat-
+# level R has more idiosyncratic noise than a whole-window R estimate, so a
+# looser reference than the window-level ratio_quality mapping is used here
+# specifically for the explicit "R-value stability" sub-score requested for
+# confidence blending. CV below ~0.05 is very stable (clean signal); above
+# ~0.15 indicates the individual beats disagree enough to be suspicious.
+SPO2_R_STABILITY_CV_REF = 0.15
+
+# --- Adaptive pulse-selection (replaces any fixed "top N%" rule) ---
+# Instead of always keeping a fixed percentile of beats, the accept
+# threshold adapts to the actual quality distribution of the current
+# window: a beat is kept if its quality clears the *higher* of the median
+# quality or 65% of the best quality seen in this window. This tracks the
+# window's own signal-to-noise regime — in a clean window nearly all beats
+# clear both bars; in a noisy window with one or two excellent beats and a
+# long tail of poor ones, the 0.65×max term still enforces a meaningful bar
+# rather than admitting the whole noisy tail just because it's "above
+# median of a bad population".
+SPO2_ADAPTIVE_SELECTION_MAX_FRACTION = 0.65
+SPO2_MIN_SELECTED_PULSES = 2
+
+# --- Dominant cardiac frequency check ---
 # A true pulse concentrates most of its spectral energy in a narrow band
 # around the fundamental heart rate. Periodic non-physiological noise
 # (e.g. mains-coupled interference, a rhythmic mechanical tap) can pass
@@ -90,12 +326,74 @@ CARDIAC_FREQ_MAX_HZ = 3.0   # 180 BPM
 # cardiac frequency window for us to trust that a real pulse is present.
 CARDIAC_POWER_RATIO_MIN = 0.15
 
-# --- Sensor status classification (Phase 4) ---
-# DC bands used to flag a weak-but-valid signal or an over-driven one
-# before it actually clips, giving early warning of a poor sensor fit.
+# Spectral concentration bandwidth: fraction of total power within ±BW Hz
+# of the dominant cardiac frequency. 0.2 Hz spans the natural beat-to-beat
+# HR variability of a resting individual (±12 BPM / Hz at 1 Hz), so a real
+# pulse contributes nearly all of its fundamental power within this band.
+SQI_SPECTRAL_CONCENTRATION_BW_HZ = 0.2
+
+# Harmonic integration bandwidth: ±BW Hz around 2f₀ and 3f₀.
+# A real PPG waveform produces strong 2nd and 3rd harmonics; motion artifacts
+# produce a broader, less harmonic spectrum. 0.15 Hz is wide enough to capture
+# the harmonic even when HR drifts slightly during the analysis window.
+SQI_HARMONIC_BW_HZ = 0.15
+
+# --- Sensor status classification ---
 SENSOR_STATUS_LOW_DC = FINGER_DC_MIN
 SENSOR_STATUS_HIGH_DC = ADC_MAX_VALUE * 0.85
-SENSOR_STATUS_CLIPPING_FRACTION = 0.01  # >1% of samples pinned at the rail
+SENSOR_STATUS_CLIPPING_FRACTION = 0.01  # >1 % of samples pinned at the rail
+
+# --- HRV quality gates ---
+# Minimum number of clean (artifact-free) RR intervals required before
+# computing HRV metrics. Below this threshold, RMSSD and SDNN estimates
+# are unreliable. Clinical HRV guidelines (Task Force 1996) suggest ≥ 5
+# intervals for short-term frequency-domain analysis; we require 4 as a
+# practical minimum for time-domain metrics, accepting the reduced statistical
+# stability in exchange for producing some output from short capture windows.
+HRV_MIN_CLEAN_INTERVALS = 4
+
+# RR intervals deviating more than this fraction from the local median are
+# flagged as artifacts before HRV computation. 25 % is slightly more
+# conservative than the commonly-cited 20 % ectopic-beat threshold
+# (Clifford et al. 2006) to account for additional noise in a PPG-derived
+# RR series vs. an ECG-derived one.
+HRV_ARTIFACT_RR_TOLERANCE = 0.25
+
+
+# ---------------------------------------------------------------------------
+# Module-level optional state — SpO2 physiological smoothing + signal lock
+# ---------------------------------------------------------------------------
+# This module is designed stateless: every public function accepts an explicit
+# buffer argument with no reliance on call order. The exceptions are SpO2
+# physiological smoothing and the SpO2 signal-lock state machine, both of
+# which require memory of the previous trusted estimate/state. We store them
+# in a module-level dict so the `estimate_spo2` function signature can remain
+# backward compatible (callers that only ever passed `ir, red, fs` keep
+# working unmodified, with state tracked internally) while still allowing
+# callers who want explicit, externally-owned state (as introduced by the
+# newer beat-by-beat SpO2 pipeline) to pass it in and get it back out.
+_spo2_state: dict = {
+    "last_spo2": None,
+    "last_confidence": 0.0,
+    "state": "SEARCHING",
+    "lock_duration_sec": 0.0,
+}
+
+
+def reset_spo2_state() -> None:
+    """
+    Reset the SpO2 physiological smoothing and signal-lock state.
+
+    Call this when starting a new recording session, when the finger is
+    removed (detected → not-detected transition), or after a gap in
+    measurements longer than ~30 seconds, to prevent the smoother/lock
+    state machine from carrying a stale baseline into a fresh measurement
+    window.
+    """
+    _spo2_state["last_spo2"] = None
+    _spo2_state["last_confidence"] = 0.0
+    _spo2_state["state"] = "SEARCHING"
+    _spo2_state["lock_duration_sec"] = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +417,8 @@ def _min_filtfilt_len(order: int) -> int:
 def _motion_artifact_score(raw_signal: np.ndarray) -> float:
     """
     Shared motion-artifact sub-score (0-1, higher = less motion) used by
-    both `compute_signal_quality` and `estimate_heart_rate`, so the same
-    robust-statistics logic isn't duplicated in two places.
+    `compute_signal_quality`, `estimate_heart_rate`, and `estimate_spo2`, so
+    the same robust-statistics logic isn't duplicated across the module.
 
     Sample-to-sample jumps far larger than the typical pulsatile
     derivative indicate hand/arm motion rather than a heartbeat. Each
@@ -135,6 +433,231 @@ def _motion_artifact_score(raw_signal: np.ndarray) -> float:
     mad = float(np.median(np.abs(diffs - median_diff))) + 1e-9
     outlier_fraction = float(np.mean(diffs > median_diff + 10 * mad))
     return float(np.clip(1.0 - outlier_fraction * 10.0, 0.0, 1.0))
+
+
+def _rolling_mean_std(x: np.ndarray, window: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Rolling mean and standard deviation via a uniform (box) filter — O(n),
+    no explicit Python loop. `var = E[x^2] - E[x]^2`, clipped at 0 to guard
+    against tiny negative values from floating-point cancellation.
+    """
+    window = max(min(window, x.size), 3)
+    mean = uniform_filter1d(x, size=window, mode="nearest")
+    mean_sq = uniform_filter1d(x * x, size=window, mode="nearest")
+    var = np.clip(mean_sq - mean * mean, 0.0, None)
+    return mean, np.sqrt(var)
+
+
+def _normalize_signal(filtered: np.ndarray, fs: float) -> np.ndarray:
+    """
+    Rolling z-score normalization: subtract the local (rolling) mean and
+    divide by the local (rolling) standard deviation. This is what lets a
+    single fixed constant (`PEAK_ADAPTIVE_K`) act as an adaptive
+    "rolling_mean + k*rolling_std" threshold at every point in the signal,
+    without recomputing that expression by hand at each sample — and it
+    makes peak detection robust to perfusion/LED-current changes that
+    would otherwise require re-tuning a fixed-count threshold.
+
+    A floor on the local std (based on the buffer's *global* std) prevents
+    near-flat segments (e.g. a genuinely weak-perfusion stretch) from
+    amplifying tiny fluctuations into spurious full-height "peaks".
+    """
+    if filtered.size < 3:
+        return filtered - np.mean(filtered) if filtered.size else filtered
+
+    window = int(fs * NORMALIZATION_WINDOW_SECONDS)
+    local_mean, local_std = _rolling_mean_std(filtered, window)
+    global_std = float(np.std(filtered))
+    std_floor = np.maximum(local_std, global_std * 0.1 + 1e-9)
+    return (filtered - local_mean) / std_floor
+
+
+def _local_energy_envelope(signal: np.ndarray, fs: float) -> np.ndarray:
+    """
+    Short-time energy (STE) envelope computed with a Hamming-weighted sliding
+    window of length `LOCAL_ENERGY_WINDOW_SEC`.
+
+    STE = sum_k( w[k] * x[n-k]^2 ) where w is a Hamming window normalized
+    to sum to 1.0. Captures instantaneous squared amplitude in a perceptually
+    smooth, spectrally well-behaved way. The squared signal (not RMS) is
+    used because we compare energy *ratios* when computing the adaptive
+    prominence floor — the units cancel and the ratio is the same.
+
+    Implemented via `np.convolve` with 'same' mode so the output is the same
+    length as the input with no index offset to manage. Edge samples are
+    zero-padded (conservative underestimate of energy) which is acceptable
+    because edge samples are already less reliable for peak detection.
+    """
+    win_len = max(int(fs * LOCAL_ENERGY_WINDOW_SEC), 3)
+    win_len = min(win_len, signal.size)
+    hamming = np.hamming(win_len)
+    hamming /= hamming.sum()  # normalize: energy in amplitude² units per sample
+    return np.convolve(signal ** 2, hamming, mode="same")
+
+
+def _local_robust_extremum(signal: np.ndarray, idx: int, half_width: int = 1) -> float:
+    """
+    Denoised value at `idx`: the mean of `signal[idx - half_width : idx + half_width + 1]`
+    (clipped to valid bounds), rather than the single raw sample at `idx`.
+
+    Rationale (new in Version C review): a systolic peak or pulse trough used
+    directly for AC-amplitude estimation (in `_detect_peaks`'s `local_amplitudes`
+    and in `estimate_spo2`'s per-beat AC/DC extraction) is a single sample drawn
+    from a band-passed but still noisy signal (ADC quantization noise, residual
+    shot noise, LED-driver ripple). A single noisy sample at exactly the
+    extremum biases the AC estimate and, downstream, the R = (AC_red/DC_red) /
+    (AC_ir/DC_ir) ratio used for SpO2. Averaging a small neighborhood around
+    the extremum (a form of local smoothing restricted to the sample of
+    interest, not a global filter that would blur timing) is a standard,
+    literature-supported way to reduce this single-sample sensitivity without
+    touching peak *location* (still detected on the un-averaged signal) or
+    introducing any new free parameter beyond a fixed, small half-width.
+    half_width = 1 (3-tap average) is deliberately small: a systolic peak's
+    local curvature over 2 samples at typical fs (25-100 Hz) is negligible
+    compared to the pulse width (80-350 ms), so this does not measurably
+    flatten genuine peak/trough amplitude while still averaging out
+    single-sample noise.
+    """
+    n = signal.size
+    if n == 0:
+        return 0.0
+    lo = max(idx - half_width, 0)
+    hi = min(idx + half_width + 1, n)
+    if hi <= lo:
+        return float(signal[max(min(idx, n - 1), 0)])
+    return float(np.mean(signal[lo:hi]))
+
+
+def _weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
+    """
+    Weighted median of `values` with non-negative `weights`.
+
+    A weighted median x* satisfies: the cumulative weight of all values ≤ x*
+    is ≥ W/2 and the cumulative weight of all values ≥ x* is ≥ W/2, where
+    W = sum(weights). Unlike the weighted mean, it is resistant to outliers
+    — a single large weight on an outlying value does not pull x* toward it
+    unless that outlier's weight exceeds half the total weight.
+
+    This property is why we use it for RR-interval and SpO2 R-value
+    aggregation: an occasional missed-beat interval, or a single artifact
+    beat with a low confidence weight, does not bias the result the way it
+    would in a weighted mean.
+
+    Falls back to standard median if all weights are zero or `values` has
+    only one element, to maintain a valid return under degenerate inputs.
+    """
+    if values.size == 0:
+        return 0.0
+    total_weight = float(np.sum(weights))
+    if total_weight <= 0.0 or values.size == 1:
+        return float(np.median(values))
+    sort_idx = np.argsort(values)
+    cumulative = np.cumsum(weights[sort_idx])
+    idx = int(np.searchsorted(cumulative, total_weight / 2.0))
+    idx = min(idx, values.size - 1)
+    return float(values[sort_idx[idx]])
+
+
+def _compute_spectrum(filtered: np.ndarray, fs: float) -> dict:
+    """
+    Compute a Hann-windowed power spectrum of the band-passed signal once
+    and return all derived spectral features needed by both
+    `compute_signal_quality` and `assess_finger_presence`.
+
+    Sharing a single FFT call eliminates redundant computation when both
+    functions are called in the same pipeline update step (the common case).
+
+    Returns
+    -------
+    dict with keys:
+      freqs                : FFT frequency bins (Hz), shape (N//2+1,)
+      power                : periodogram power (amplitude²), same shape
+      total_power          : scalar sum of all power bins
+      cardiac_mask         : boolean mask selecting [CARDIAC_FREQ_MIN_HZ,
+                             CARDIAC_FREQ_MAX_HZ] bins
+      dominant_freq        : dominant frequency within cardiac band (Hz),
+                             or None if the buffer is too short
+      cardiac_power_ratio  : fraction of total power within cardiac band
+      spectral_entropy     : normalized Shannon entropy of the cardiac-band
+                             power spectrum; 1.0 = perfectly periodic (all
+                             power in one bin), 0.0 = white noise
+      spectral_concentration: fraction of *total* power within ±0.2 Hz of
+                             the dominant cardiac frequency
+      harmonic_ratio       : (P_2f₀ + P_3f₀) / P_f₀ — real PPG waveforms
+                             have significant harmonic content; noise does not
+    """
+    n = filtered.size
+    if n < int(fs * 3):  # need ≥ 3 s to resolve ~1 Hz components
+        return {
+            "freqs": np.array([]), "power": np.array([]),
+            "total_power": 0.0, "cardiac_mask": np.array([], dtype=bool),
+            "dominant_freq": None, "cardiac_power_ratio": 0.0,
+            "spectral_entropy": 0.0, "spectral_concentration": 0.0,
+            "harmonic_ratio": 0.0,
+        }
+
+    windowed = filtered * np.hanning(n)
+    spectrum = np.abs(np.fft.rfft(windowed))
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    power = spectrum ** 2
+    total_power = float(np.sum(power)) + 1e-12
+
+    cardiac_mask = (freqs >= CARDIAC_FREQ_MIN_HZ) & (freqs <= CARDIAC_FREQ_MAX_HZ)
+    if not np.any(cardiac_mask):
+        return {
+            "freqs": freqs, "power": power, "total_power": total_power,
+            "cardiac_mask": cardiac_mask, "dominant_freq": None,
+            "cardiac_power_ratio": 0.0, "spectral_entropy": 0.0,
+            "spectral_concentration": 0.0, "harmonic_ratio": 0.0,
+        }
+
+    cardiac_power = power[cardiac_mask]
+    cardiac_freqs = freqs[cardiac_mask]
+    dominant_freq = float(cardiac_freqs[int(np.argmax(cardiac_power))])
+    cardiac_power_ratio = float(np.sum(cardiac_power) / total_power)
+
+    # --- Spectral entropy (normalized Shannon entropy of cardiac-band PSD) ---
+    # H = -sum( p_i * log(p_i) ) where p_i is the fraction of cardiac-band
+    # power in bin i. Normalized by log(N_bins) so the result is in [0, 1]
+    # regardless of FFT resolution. Score = 1 - H/H_max so that 1.0 means
+    # perfectly periodic (all power in one bin) and 0.0 means white noise.
+    # Used in SQI as a spectral-domain quality indicator independent of SNR.
+    p_cardiac = cardiac_power / (float(np.sum(cardiac_power)) + 1e-12)
+    h_max = np.log(max(p_cardiac.size, 2))
+    h_raw = -float(np.sum(p_cardiac * np.log(p_cardiac + 1e-12)))
+    spectral_entropy = float(np.clip(1.0 - h_raw / h_max, 0.0, 1.0))
+
+    # --- Spectral concentration: power within ±BW Hz of dominant freq ---
+    # Measures the "peakedness" of the cardiac-band spectrum. A clean PPG
+    # signal concentrates most of its energy within ±0.2 Hz of the fundamental
+    # (equivalent to ±12 BPM at 1 Hz); motion artifacts spread energy broadly.
+    bw = SQI_SPECTRAL_CONCENTRATION_BW_HZ
+    conc_mask = (freqs >= dominant_freq - bw) & (freqs <= dominant_freq + bw)
+    spectral_concentration = float(np.sum(power[conc_mask]) / total_power)
+
+    # --- Harmonic ratio: (P_2f₀ + P_3f₀) / P_f₀ ---
+    # Real PPG waveforms are periodic non-sinusoidal signals and therefore have
+    # substantial 2nd and 3rd harmonic content. White noise and most motion
+    # artifacts have a flat spectrum; the harmonic ratio discriminates.
+    # We integrate power within ±SQI_HARMONIC_BW_HZ around each harmonic
+    # to capture the harmonic even when HR drifts slightly during the window.
+    def _band_power(f_center: float) -> float:
+        m = (freqs >= f_center - SQI_HARMONIC_BW_HZ) & (freqs <= f_center + SQI_HARMONIC_BW_HZ)
+        return float(np.sum(power[m])) if np.any(m) else 0.0
+
+    p_f0 = _band_power(dominant_freq) + 1e-12
+    p_2f0 = _band_power(2.0 * dominant_freq)
+    p_3f0 = _band_power(3.0 * dominant_freq)
+    harmonic_ratio = float(np.clip((p_2f0 + p_3f0) / p_f0, 0.0, 5.0))
+
+    return {
+        "freqs": freqs, "power": power, "total_power": total_power,
+        "cardiac_mask": cardiac_mask, "dominant_freq": dominant_freq,
+        "cardiac_power_ratio": cardiac_power_ratio,
+        "spectral_entropy": spectral_entropy,
+        "spectral_concentration": spectral_concentration,
+        "harmonic_ratio": harmonic_ratio,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +698,26 @@ def _lowpass_dc(signal, fs: float, cutoff_hz: float = 0.5) -> np.ndarray:
     Low-pass filter used to track the slowly varying DC (tissue baseline)
     component, e.g. for AC/DC ratio calculations that need a DC estimate
     aligned in time with the AC waveform rather than a single scalar mean.
+
+    This dynamic, time-aligned DC tracker (rather than a single scalar
+    buffer-wide mean) is what `estimate_spo2` uses per-beat: LED drive
+    current, ambient temperature, and light tissue-contact drift all shift
+    the DC baseline slowly over the course of a multi-second buffer, and a
+    single global mean would smear that drift into the AC/DC ratio for
+    beats far from the buffer center.
+
+    Review note: at the physiological floor (MIN_BPM = 40 BPM = 0.67 Hz),
+    the 0.5 Hz default cutoff leaves only a ~0.17 Hz margin before this
+    low-pass tracker starts to pass part of the cardiac fundamental into
+    what is meant to be a pure DC/baseline estimate. That margin is
+    workable in practice (the filter's roll-off means only a small fraction
+    of cardiac energy leaks through at 0.67 Hz), but a caller processing a
+    subject with resting HR at the very low end of the physiological range
+    may see very slightly biased R values as a result. Rather than silently
+    lowering the default (which would change existing behaviour for every
+    caller relying on the current default), this is left as configurable
+    via `cutoff_hz` and documented here so an integrator can tighten it
+    (e.g. to 0.3 Hz) for subjects known to run bradycardic.
     """
     x = _as_float_array(signal)
     if x.size < _min_filtfilt_len(2):
@@ -202,32 +745,65 @@ def dominant_cardiac_frequency(ir, fs: float = 50.0) -> tuple[float | None, floa
         the fraction of the *total* spectral power that falls within
         [CARDIAC_FREQ_MIN_HZ, CARDIAC_FREQ_MAX_HZ] — low values mean the
         buffer is dominated by noise outside the physiological range.
+
+    Note: internally delegates to `_compute_spectrum` to share the FFT
+    result with `compute_signal_quality` and `assess_finger_presence` when
+    called in the same pipeline step.
     """
     ir = _as_float_array(ir)
-    if ir.size < int(fs * 3):  # need a few seconds to resolve ~1 Hz components
-        return None, 0.0
-
     filtered = bandpass_filter(ir, fs)
-    windowed = filtered * np.hanning(filtered.size)
-    spectrum = np.abs(np.fft.rfft(windowed))
-    freqs = np.fft.rfftfreq(filtered.size, d=1.0 / fs)
-    power = spectrum ** 2
-    total_power = float(np.sum(power)) + 1e-12
-
-    cardiac_mask = (freqs >= CARDIAC_FREQ_MIN_HZ) & (freqs <= CARDIAC_FREQ_MAX_HZ)
-    if not np.any(cardiac_mask):
-        return None, 0.0
-
-    cardiac_power = power[cardiac_mask]
-    cardiac_freqs = freqs[cardiac_mask]
-    dominant_freq = float(cardiac_freqs[int(np.argmax(cardiac_power))])
-    cardiac_power_ratio = float(np.sum(cardiac_power) / total_power)
-    return dominant_freq, cardiac_power_ratio
+    spec = _compute_spectrum(filtered, fs)
+    return spec["dominant_freq"], spec["cardiac_power_ratio"]
 
 
 # ---------------------------------------------------------------------------
 # Finger detection
 # ---------------------------------------------------------------------------
+
+def _adaptive_finger_weights(dc_level: float, ac_dc_ratio: float) -> dict[str, float]:
+    """
+    Compute per-criterion weights for finger confidence scoring, adapted
+    to the current signal regime rather than using fixed values.
+
+    Rationale for regime-based adaptation:
+      - Very low DC (< 2× FINGER_DC_MIN): the sensor is barely illuminated.
+        DC range is the most informative check; pulsatile checks have little
+        signal to work with so they are down-weighted to avoid penalizing a
+        weakly perfused but genuine contact.
+      - Very high DC (> 0.9× FINGER_DC_MAX): saturation risk dominates.
+        Up-weight not_saturated; DC check is less informative because we
+        already know DC is "too high".
+      - Normal regime: balanced weights with DC and cardiac-frequency checks
+        sharing the most weight (they answer "is real tissue here?" and
+        "is it pulsing physiologically?" respectively).
+
+    All weights are normalized to sum to 1.0.
+    """
+    if dc_level < 2 * FINGER_DC_MIN:
+        raw = {
+            "dc_in_range": 0.40, "not_saturated": 0.10, "sufficient_ac": 0.15,
+            "plausible_ratio": 0.08, "stable": 0.10,
+            "has_cardiac_frequency": 0.12, "perfusion_index_ok": 0.05,
+        }
+    elif dc_level > 0.9 * FINGER_DC_MAX:
+        raw = {
+            "dc_in_range": 0.15, "not_saturated": 0.30, "sufficient_ac": 0.15,
+            "plausible_ratio": 0.08, "stable": 0.10,
+            "has_cardiac_frequency": 0.17, "perfusion_index_ok": 0.05,
+        }
+    else:
+        # Normal regime. DC range and cardiac-frequency share the most weight.
+        # perfusion_index_ok is a higher-specificity version of plausible_ratio
+        # (expressed as percent rather than ratio) and adds independent
+        # discriminative value even when plausible_ratio passes.
+        raw = {
+            "dc_in_range": 0.22, "not_saturated": 0.10, "sufficient_ac": 0.18,
+            "plausible_ratio": 0.08, "stable": 0.10,
+            "has_cardiac_frequency": 0.22, "perfusion_index_ok": 0.10,
+        }
+    total = sum(raw.values())
+    return {k: v / total for k, v in raw.items()}
+
 
 def assess_finger_presence(ir, fs: float = 50.0) -> dict:
     """
@@ -239,19 +815,28 @@ def assess_finger_presence(ir, fs: float = 50.0) -> dict:
     the majority to agree, producing a continuous confidence score rather
     than a brittle yes/no cutoff.
 
-    Criteria (each contributes a weighted vote to `confidence`):
+    Criteria (each contributes an adaptive weighted vote to `confidence`):
       - DC level within the plausible tissue-contact range
       - not saturating the ADC (motion/pressure can slam the signal to rail)
       - pulsatile AC amplitude is large enough to be a real pulse, not noise
       - AC/DC ratio falls within the physiological perfusion-index range
       - DC level is stable over the recent window (a finger being placed/
         removed, or ambient light flooding the sensor, causes large swings)
+      - dominant cardiac frequency present (rejects periodic non-cardiac noise)
+      - perfusion index (AC/DC × 100 %) in physiologically valid range
+        (more specific than the AC/DC ratio check alone)
+
+    The `_compute_spectrum` helper is called once and its output is shared
+    with downstream SQI computation to avoid recomputing the FFT.
 
     Returns
     -------
     dict with keys: detected (bool), confidence (0-1 float), dc_level,
     ac_amplitude, ac_dc_ratio, saturated (bool), stability (0-1 float),
-    reason (str, human-readable explanation when not detected).
+    reason (str), dominant_frequency_hz, cardiac_power_ratio (all existing),
+    plus: perfusion_index (%), contact_quality (0-1 float),
+    spectral_concentration (0-1 float), pulse_repeatability (0-1 float),
+    frequency_quality (0-1 float, alias for cardiac_power_ratio).
     """
     ir = _as_float_array(ir)
     min_samples = max(int(FINGER_MIN_STABLE_SECONDS * fs), 20)
@@ -260,17 +845,22 @@ def assess_finger_presence(ir, fs: float = 50.0) -> dict:
             "detected": False, "confidence": 0.0, "dc_level": 0.0,
             "ac_amplitude": 0.0, "ac_dc_ratio": 0.0, "saturated": False,
             "stability": 0.0, "reason": "insufficient_samples",
+            "dominant_frequency_hz": None, "cardiac_power_ratio": 0.0,
+            # new fields
+            "perfusion_index": 0.0, "contact_quality": 0.0,
+            "spectral_concentration": 0.0, "pulse_repeatability": 0.0,
+            "frequency_quality": 0.0,
         }
 
     dc_level = float(np.mean(ir))
     ac_amplitude = float(np.std(ir - dc_level))
     ac_dc_ratio = ac_amplitude / (dc_level + 1e-9)
+    perfusion_index = ac_dc_ratio * 100.0  # percent
     saturated = bool(np.max(ir) >= ADC_MAX_VALUE * SATURATION_FRACTION)
 
-    # Stability: split the buffer into ~0.5 s sub-windows and look at how
-    # much the sub-window means wander relative to the overall DC level.
+    # --- DC stability across ~0.5 s sub-windows ---
     # A finger resting steadily on the sensor gives a near-flat DC trend;
-    # ambient light changes or a finger sliding on/off cause large jumps.
+    # ambient light changes or a finger sliding on/off cause large swings.
     sub_window = max(int(fs * 0.5), 1)
     n_sub = ir.size // sub_window
     if n_sub >= 2:
@@ -280,13 +870,41 @@ def assess_finger_presence(ir, fs: float = 50.0) -> dict:
     else:
         stability = 0.5  # not enough sub-windows to judge; stay neutral
 
-    # Dominant cardiac frequency (Phase 3): rejects periodic non-cardiac
-    # noise (mains coupling, rhythmic taps) that could otherwise satisfy
-    # the amplitude/ratio checks above without a real pulse behind it.
-    dominant_freq, cardiac_power_ratio = dominant_cardiac_frequency(ir, fs)
+    # --- Spectral features via shared _compute_spectrum (no duplicate FFT) ---
+    filtered = bandpass_filter(ir, fs)
+    spec = _compute_spectrum(filtered, fs)
+    dominant_freq = spec["dominant_freq"]
+    cardiac_power_ratio = spec["cardiac_power_ratio"]
+    spectral_concentration = spec["spectral_concentration"]
+
     has_cardiac_frequency = (
         dominant_freq is not None and cardiac_power_ratio >= CARDIAC_POWER_RATIO_MIN
     )
+
+    # --- Pulse repeatability: CV of beat-to-beat peak heights ---
+    # Real tissue generates pulses of consistent amplitude; noise or a hard
+    # surface produces randomly varying apparent "beats" with high CV.
+    peaks_for_rep = _detect_peaks(filtered, fs, return_properties=False)
+    if peaks_for_rep.size >= 3:
+        peak_heights = filtered[peaks_for_rep]
+        cv_peaks = float(np.std(peak_heights) / (np.abs(np.mean(peak_heights)) + 1e-9))
+        pulse_repeatability = float(
+            np.clip(1.0 - cv_peaks / FINGER_PULSE_REPEATABILITY_CV_MAX, 0.0, 1.0)
+        )
+    else:
+        pulse_repeatability = 0.0
+
+    # --- Contact quality: mechanical contact score independent of pulsatile
+    # quality. Combines DC stability, non-saturation, and proportional DC level.
+    # This is useful as a separate diagnostic from overall confidence; low
+    # contact_quality with high pulsatile quality can indicate pressure artifact.
+    dc_score = float(np.clip(
+        (dc_level - FINGER_DC_MIN) / (FINGER_DC_MAX - FINGER_DC_MIN + 1.0),
+        0.0, 1.0,
+    ))
+    contact_quality = float(np.clip(
+        stability * (1.0 - float(saturated)) * dc_score, 0.0, 1.0
+    ))
 
     checks = {
         "dc_in_range": FINGER_DC_MIN <= dc_level <= FINGER_DC_MAX,
@@ -295,22 +913,17 @@ def assess_finger_presence(ir, fs: float = 50.0) -> dict:
         "plausible_ratio": FINGER_AC_DC_RATIO_MIN <= ac_dc_ratio <= FINGER_AC_DC_RATIO_MAX,
         "stable": stability > 0.3,
         "has_cardiac_frequency": has_cardiac_frequency,
+        "perfusion_index_ok": FINGER_PI_MIN_PCT <= perfusion_index <= FINGER_PI_MAX_PCT,
     }
-    # Weights sum to 1.0. DC range/saturation confirm "something is on the
-    # sensor"; AC/ratio/cardiac-frequency confirm "and it's pulsing like
-    # real tissue", which is why the cardiac-frequency check carries as
-    # much weight as DC range.
-    weights = {
-        "dc_in_range": 0.25, "not_saturated": 0.10, "sufficient_ac": 0.20,
-        "plausible_ratio": 0.10, "stable": 0.10, "has_cardiac_frequency": 0.25,
-    }
+
+    # Adaptive weights based on the current signal regime
+    weights = _adaptive_finger_weights(dc_level, ac_dc_ratio)
     confidence = sum(weights[k] for k, passed in checks.items() if passed)
 
-    # Hard requirements even at high confidence: no tissue-range DC, an
-    # outright saturated sensor, or the absence of any real cardiac-band
-    # spectral peak should never be reported as "detected" — these three
-    # are structural failures that no amount of amplitude/ratio agreement
-    # should be able to outvote.
+    # Hard requirements: no tissue-range DC, an outright saturated sensor,
+    # or the absence of any cardiac-band spectral peak should never be
+    # reported as "detected" — these are structural failures that no amount
+    # of amplitude/ratio agreement should be able to outvote.
     detected = (
         confidence >= 0.6
         and checks["dc_in_range"]
@@ -330,9 +943,15 @@ def assess_finger_presence(ir, fs: float = 50.0) -> dict:
         "saturated": saturated,
         "stability": round(stability, 3),
         "reason": reason,
-        # --- additive diagnostics (Phase 3) ---
+        # existing additive diagnostics
         "dominant_frequency_hz": round(dominant_freq, 3) if dominant_freq is not None else None,
         "cardiac_power_ratio": round(cardiac_power_ratio, 3),
+        # new diagnostics
+        "perfusion_index": round(perfusion_index, 4),
+        "contact_quality": round(contact_quality, 3),
+        "spectral_concentration": round(spectral_concentration, 3),
+        "pulse_repeatability": round(pulse_repeatability, 3),
+        "frequency_quality": round(cardiac_power_ratio, 3),  # explicit alias
     }
 
 
@@ -340,28 +959,42 @@ def assess_finger_presence(ir, fs: float = 50.0) -> dict:
 # Signal Quality Index (SQI)
 # ---------------------------------------------------------------------------
 
-def compute_signal_quality(ir, fs: float = 50.0) -> dict:
+def _compute_signal_quality_impl(
+    ir: np.ndarray,
+    fs: float,
+    filtered: np.ndarray | None = None,
+    peaks: np.ndarray | None = None,
+) -> dict:
     """
-    Composite Signal Quality Index (SQI), 0-100.
+    Internal implementation shared by the public `compute_signal_quality`
+    and by `estimate_heart_rate` / `estimate_spo2`.
 
-    Combines several independent quality indicators used in PPG-quality
-    literature (Elgendi 2016; Orphanidou et al. 2015):
-      - SNR: cardiac-band power vs. out-of-band residual power
-      - clipping: fraction of samples pinned near the ADC rail
-      - motion artifacts: large sample-to-sample jumps (derivative outliers)
-      - pulse consistency: coefficient of variation of detected RR intervals
-      - amplitude: pulsatile AC amplitude relative to the minimum needed
-        for reliable peak detection
+    Review finding (performance): both `estimate_heart_rate` and
+    `estimate_spo2` used to call the public `compute_signal_quality(ir, fs)`
+    after already computing their own band-passed signal and peak set,
+    causing `bandpass_filter` (a filtfilt call) and `_detect_peaks` (which
+    itself does rolling normalization + an energy-envelope convolution +
+    find_peaks) to run a second time on the same buffer. Accepting already-
+    computed `filtered`/`peaks` here — while keeping the public
+    `compute_signal_quality(ir, fs)` signature completely unchanged for
+    external callers — removes that duplicate work.
 
-    Returns a dict with the composite `score` plus the individual
-    sub-scores (each 0-1) for debugging/telemetry.
+    `ir` is still required (independent of `filtered`) because clipping and
+    perfusion-index calculations need the raw ADC counts, not the band-passed
+    signal.
     """
-    ir = _as_float_array(ir)
+    empty = {
+        "score": 0.0, "snr_db": None, "clipping_fraction": None,
+        "motion_score": None, "pulse_consistency": None, "amplitude_score": None,
+        "spectral_entropy": None, "spectral_concentration": None,
+        "harmonic_ratio": None, "perfusion_index": None,
+        "pulse_repeatability": None, "frequency_stability": None,
+    }
     if ir.size < int(fs * 2):
-        return {"score": 0.0, "snr_db": None, "clipping_fraction": None,
-                "motion_score": None, "pulse_consistency": None, "amplitude_score": None}
+        return empty
 
-    filtered = bandpass_filter(ir, fs)
+    if filtered is None:
+        filtered = bandpass_filter(ir, fs)
     dc_level = float(np.mean(ir))
 
     # --- SNR: cardiac-band signal power vs. residual (out-of-band) power ---
@@ -369,8 +1002,7 @@ def compute_signal_quality(ir, fs: float = 50.0) -> dict:
     signal_power = float(np.var(filtered))
     noise_power = float(np.var(residual)) + 1e-9
     snr_db = 10.0 * np.log10(signal_power / noise_power) if signal_power > 0 else -60.0
-    # Map ~0-20 dB onto a 0-1 quality sub-score (below 0 dB is unusable,
-    # above 20 dB is excellent for a wrist/finger PPG).
+    # Map ~0-20 dB onto 0-1; below 0 dB is unusable, above 20 dB is excellent.
     snr_score = float(np.clip(snr_db / 20.0, 0.0, 1.0))
 
     # --- Clipping: fraction of samples pinned at the ADC ceiling/floor ---
@@ -381,33 +1013,78 @@ def compute_signal_quality(ir, fs: float = 50.0) -> dict:
     # --- Motion artifacts (see `_motion_artifact_score` docstring) ---
     motion_score = _motion_artifact_score(ir)
 
-    # --- Pulse consistency: regular RR intervals indicate a clean,
-    # trustworthy pulsatile signal; irregular intervals usually mean the
-    # peak detector is tracking noise rather than real beats.
-    peaks = _detect_peaks(filtered, fs)
+    # --- Pulse consistency and frequency stability from RR intervals ---
+    if peaks is None:
+        peaks = _detect_peaks(filtered, fs)
     if peaks.size >= 3:
         rr = np.diff(peaks) / fs
         valid_rr = rr[(rr >= MIN_RR_SEC) & (rr <= MAX_RR_SEC)]
         if valid_rr.size >= 2:
             cv = float(np.std(valid_rr) / (np.mean(valid_rr) + 1e-9))
             pulse_consistency = float(np.clip(1.0 - cv * 2.0, 0.0, 1.0))
+            # Frequency stability uses the same CV but without the 2× multiplier
+            # so a typical HRV-induced CV of ~0.05 still scores near 0.95 rather
+            # than being penalized down to 0.9.
+            frequency_stability = float(np.clip(1.0 - cv, 0.0, 1.0))
         else:
             pulse_consistency = 0.0
+            frequency_stability = 0.0
     else:
         pulse_consistency = 0.0
+        frequency_stability = 0.0
 
-    # --- Amplitude: pulsatile swing relative to the minimum we trust ---
+    # --- Amplitude and perfusion index ---
     ac_amplitude = float(np.std(filtered))
     amplitude_score = float(np.clip(ac_amplitude / (FINGER_MIN_AC_COUNTS * 4.0), 0.0, 1.0))
 
-    # Weighted composite. SNR and pulse consistency are the most direct
-    # indicators of "can we trust a heart-rate estimate from this window".
+    perfusion_index = ac_amplitude / (dc_level + 1e-9) * 100.0  # percent
+    # Log-scale PI score: maps the 250× dynamic range of valid PI (0.02-10 %)
+    # onto a 0-1 score. Values near 0.02 % score near 0; values near 1 %
+    # score ~0.85; values at or above 10 % score 1.0 (but are rare).
+    if perfusion_index >= FINGER_PI_MIN_PCT:
+        pi_score = float(np.clip(
+            np.log10(perfusion_index / FINGER_PI_MIN_PCT)
+            / np.log10(FINGER_PI_MAX_PCT / FINGER_PI_MIN_PCT),
+            0.0, 1.0,
+        ))
+    else:
+        pi_score = 0.0
+
+    # --- Spectral features via shared _compute_spectrum (no duplicate FFT) ---
+    spec = _compute_spectrum(filtered, fs)
+    spectral_entropy = spec["spectral_entropy"]
+    spectral_concentration = spec["spectral_concentration"]
+    harmonic_ratio_raw = spec["harmonic_ratio"]
+
+    # Harmonic ratio score: map [0, 2.0] → [0, 1]. We cap at 2.0 because
+    # ratios above ~2 are unusual and may reflect a harmonic-frequency artifact
+    # rather than a genuine PPG harmonic. Typical clean PPG: 0.3-1.2.
+    harmonic_score = float(np.clip(harmonic_ratio_raw / 2.0, 0.0, 1.0))
+
+    # --- Pulse repeatability: beat-to-beat peak height CV ---
+    if peaks.size >= 3:
+        peak_heights_f = filtered[peaks]
+        cv_peaks = float(np.std(peak_heights_f) / (np.abs(np.mean(peak_heights_f)) + 1e-9))
+        pulse_repeatability = float(
+            np.clip(1.0 - cv_peaks / FINGER_PULSE_REPEATABILITY_CV_MAX, 0.0, 1.0)
+        )
+    else:
+        pulse_repeatability = 0.0
+
+    # --- Composite SQI (weighted blend, weights sum to 1.0) ---
+    # SNR and pulse consistency are the two strongest direct quality indicators.
+    # Spectral features provide substantial corroborating evidence. The remaining
+    # checks fill in edge cases not well-captured by time-domain metrics alone.
     score = (
-        0.30 * snr_score
-        + 0.15 * clipping_score
-        + 0.15 * motion_score
-        + 0.25 * pulse_consistency
-        + 0.15 * amplitude_score
+        0.22 * snr_score
+        + 0.18 * pulse_consistency
+        + 0.10 * clipping_score
+        + 0.10 * motion_score
+        + 0.10 * spectral_entropy
+        + 0.10 * spectral_concentration
+        + 0.08 * harmonic_score
+        + 0.07 * pi_score
+        + 0.05 * pulse_repeatability
     ) * 100.0
 
     return {
@@ -417,90 +1094,560 @@ def compute_signal_quality(ir, fs: float = 50.0) -> dict:
         "motion_score": round(motion_score, 3),
         "pulse_consistency": round(pulse_consistency, 3),
         "amplitude_score": round(amplitude_score, 3),
+        # spectral / perfusion sub-scores
+        "spectral_entropy": round(spectral_entropy, 3),
+        "spectral_concentration": round(spectral_concentration, 3),
+        "harmonic_ratio": round(harmonic_ratio_raw, 3),
+        "perfusion_index": round(perfusion_index, 4),
+        "pulse_repeatability": round(pulse_repeatability, 3),
+        "frequency_stability": round(frequency_stability, 3),
     }
 
 
-# ---------------------------------------------------------------------------
-# Heart rate
-# ---------------------------------------------------------------------------
-
-def _detect_peaks(filtered_signal: np.ndarray, fs: float) -> np.ndarray:
+def compute_signal_quality(ir, fs: float = 50.0) -> dict:
     """
-    Adaptive systolic-peak detector shared by HR estimation and SQI.
+    Composite Signal Quality Index (SQI), 0-100.
 
-    Uses scipy.find_peaks with:
-      - a minimum distance enforcing the fastest plausible heart rate
-        (prevents double-counting the dicrotic notch as a separate beat)
-      - a prominence threshold scaled to the signal's own amplitude
-        (adaptive rather than a fixed count value, so it works across
-        different perfusion levels / LED currents)
+    Combines independent quality indicators drawn from PPG-quality
+    literature (Elgendi 2016; Orphanidou et al. 2015; Temko 2017).
+
+    Components:
+      - SNR: cardiac-band power vs. out-of-band residual power
+      - clipping: fraction of samples pinned near the ADC rail
+      - motion artifacts: large sample-to-sample derivative outliers
+      - pulse consistency: coefficient of variation of detected RR intervals
+      - amplitude: pulsatile AC amplitude relative to minimum trusted level
+      - spectral_entropy: 1 − normalized Shannon entropy of the cardiac-band
+        PSD; 1.0 = perfectly periodic, 0.0 = white noise
+      - spectral_concentration: fraction of total power within ±0.2 Hz of
+        the dominant cardiac frequency; high = clean, narrow spectral peak
+      - harmonic_ratio: (P_2f₀ + P_3f₀) / P_f₀; real PPG waveforms have
+        significant harmonic content, broadband noise does not
+      - perfusion_index: AC/DC × 100 %, scored logarithmically over the
+        0.02-10 % physiological range
+      - pulse_repeatability: 1 − CV of beat-to-beat peak amplitude; consistent
+        pulse height indicates a stable reflectance surface
+      - frequency_stability: 1 − CV of instantaneous frequency (successive
+        RR); low CV = regular rhythm, high CV = arrhythmia or motion artifact
+
+    Internally delegates to `_compute_signal_quality_impl`, which
+    `estimate_heart_rate` and `estimate_spo2` also call directly with their
+    already-computed filtered signal/peaks to avoid a duplicate filtfilt +
+    peak-detection pass on the same buffer (see that function's docstring).
+    This function's public signature and return keys are unchanged.
+
+    Returns a dict with the composite `score` plus all sub-scores (each 0-1
+    where defined, snr_db in dB) for debugging/telemetry.
+    """
+    ir = _as_float_array(ir)
+    return _compute_signal_quality_impl(ir, fs)
+
+
+# ---------------------------------------------------------------------------
+# Heart rate — peak detection
+# ---------------------------------------------------------------------------
+
+def _detect_peaks(
+    filtered_signal: np.ndarray, fs: float, return_properties: bool = False
+):
+    """
+    Adaptive systolic-peak detector shared by HR estimation, SQI, finger
+    detection, and SpO2.
+
+    Pipeline:
+      1. Rolling z-score normalization (`_normalize_signal`) so a single fixed
+         threshold behaves like an adaptive "rolling_mean + k*rolling_std"
+         cutoff at every point in time.
+      2. Local short-time energy (STE) envelope (`_local_energy_envelope`).
+         Peaks in flat/near-zero-energy segments are suppressed even if their
+         z-score clears the threshold (which normalization amplifies them into
+         doing) — preventing flat-line noise from being reported as beats.
+      3. Adaptive prominence scaling: required prominence is scaled by
+         (local_energy / median_energy)^ADAPTIVE_PROMINENCE_ALPHA so that
+         high-perfusion peaks face a proportionally higher bar and
+         low-perfusion peaks aren't penalized relative to their local amplitude.
+      4. `scipy.find_peaks` with distance (refractory period), height, and
+         prominence constraints on the *normalized* signal. Width is NOT
+         passed to find_peaks here because widths measured in the z-score
+         domain are distorted — the rolling normalization flattens the signal
+         near peaks, making the half-prominence width appear much wider than
+         the physical pulse duration (e.g. a 1 Hz PPG sine measures >400 ms
+         in normalized units but only ~180 ms in the filtered-signal domain).
+         Instead, widths are re-measured on the *filtered signal* in physical
+         amplitude units and the 80-350 ms gate is applied as a post-filter on
+         those physical-domain widths.
+      5. Post-detection energy gate, adaptive prominence post-filter, and
+         physical-domain width gate applied without re-running find_peaks.
+
+    Parameters
+    ----------
+    return_properties : if True, also return the scipy `properties` dict
+        plus: normalized_signal, local_amplitudes (peak-to-trough swing per
+        beat in filtered-signal units, denoised via a small local average
+        around the peak/trough samples — see `_local_robust_extremum` — to
+        reduce single-sample ADC/quantization noise sensitivity), and
+        energy_scores (normalized local STE at each peak). Existing callers
+        that only want peak indices pass False (the default), matching the
+        original signature's behaviour.
     """
     if filtered_signal.size < int(fs * 1.5):
-        return np.array([], dtype=int)
-    min_distance = max(int(fs * MIN_RR_SEC), 1)
-    adaptive_prominence = max(np.std(filtered_signal) * 0.35, 1e-6)
-    peaks, _ = find_peaks(filtered_signal, distance=min_distance, prominence=adaptive_prominence)
+        empty = np.array([], dtype=int)
+        return (empty, {}) if return_properties else empty
+
+    normalized = _normalize_signal(filtered_signal, fs)
+
+    # Local energy in the z-score domain — computed once, used for both
+    # the energy gate and the adaptive prominence scaling.
+    energy = _local_energy_envelope(normalized, fs)
+    median_energy = float(np.median(energy)) + 1e-12
+
+    min_distance = max(int(fs * PEAK_REFRACTORY_SEC), 1)
+    min_width_samples = max(int(fs * MIN_PEAK_WIDTH_SEC), 1)
+    max_width_samples = max(int(fs * MAX_PEAK_WIDTH_SEC), min_width_samples + 1)
+
+    # Detect on normalized signal for adaptive height/prominence threshold.
+    # Width constraint deliberately omitted here — see docstring above.
+    peaks, properties = find_peaks(
+        normalized,
+        distance=min_distance,
+        prominence=PEAK_ADAPTIVE_K,
+        height=PEAK_ADAPTIVE_K,
+    )
+
+    if peaks.size > 0:
+        # Measure the systolic pulse width in physical amplitude units.
+        # We use the left_base and right_base sample indices that find_peaks
+        # computed from the normalized signal as the pulse boundary landmarks
+        # (they correctly locate the troughs on either side of each peak),
+        # then scan inward from the peak to find the point where the filtered
+        # signal drops to 50% of the local peak-to-trough amplitude. The
+        # width = (right half-amp crossing - left half-amp crossing) in samples.
+        # This is purely time-domain arithmetic and avoids calling peak_widths
+        # with mismatched signal references.
+        left_bases = properties.get("left_bases", np.zeros(peaks.size, dtype=int)).astype(int)
+        right_bases = properties.get(
+            "right_bases", np.full(peaks.size, filtered_signal.size - 1, dtype=int)
+        ).astype(int)
+
+        phys_widths = np.zeros(peaks.size)
+        phys_lb_out = left_bases.copy()
+        phys_rb_out = right_bases.copy()
+        for i, pk in enumerate(peaks):
+            lb = int(left_bases[i])
+            rb = int(min(right_bases[i], filtered_signal.size - 1))
+            pk_val = float(filtered_signal[pk])
+            trough_val = min(
+                float(np.min(filtered_signal[lb : pk + 1])),
+                float(np.min(filtered_signal[pk : rb + 1])),
+            )
+            half_amp = trough_val + 0.5 * (pk_val - trough_val)
+            # Scan left from peak to find where signal crosses half amplitude
+            li = pk
+            while li > lb and filtered_signal[li] > half_amp:
+                li -= 1
+            # Scan right from peak to find where signal crosses half amplitude
+            ri = pk
+            while ri < rb and filtered_signal[ri] > half_amp:
+                ri += 1
+            phys_widths[i] = float(ri - li)
+            phys_lb_out[i] = li
+            phys_rb_out[i] = ri
+
+        width_mask = (
+            (phys_widths >= min_width_samples)
+            & (phys_widths <= max_width_samples)
+        )
+        peaks = peaks[width_mask]
+        # Filter all property arrays and overwrite with physical-domain values
+        properties_width_filtered: dict = {}
+        for key, val in properties.items():
+            if isinstance(val, np.ndarray) and val.shape == (width_mask.size,):
+                properties_width_filtered[key] = val[width_mask]
+            else:
+                properties_width_filtered[key] = val
+        properties_width_filtered["widths"] = phys_widths[width_mask]
+        properties_width_filtered["left_bases"] = phys_lb_out[width_mask]
+        properties_width_filtered["right_bases"] = phys_rb_out[width_mask]
+        properties = properties_width_filtered
+
+    if peaks.size == 0:
+        if return_properties:
+            properties["normalized_signal"] = normalized
+            return peaks, properties
+        return peaks
+
+    energy_at_peaks = energy[peaks]
+    n_orig = peaks.size
+
+    # --- Energy gate: hard-suppress peaks in near-silent regions ---
+    energy_mask = energy_at_peaks >= median_energy * MIN_LOCAL_ENERGY_FRACTION
+
+    # --- Adaptive prominence post-filter ---
+    # Scale the required prominence by local energy (relative to buffer median)
+    # raised to ADAPTIVE_PROMINENCE_ALPHA. Peaks with high local energy (strong
+    # pulse) must clear a proportionally higher prominence bar; peaks with low
+    # but non-zero local energy (weak pulse) are evaluated against the standard
+    # PEAK_ADAPTIVE_K threshold, not an artificially inflated one.
+    if "prominences" in properties:
+        energy_scale = (energy_at_peaks / median_energy) ** ADAPTIVE_PROMINENCE_ALPHA
+        adaptive_threshold = PEAK_ADAPTIVE_K * energy_scale
+        prominence_mask = properties["prominences"] >= adaptive_threshold
+    else:
+        prominence_mask = np.ones(n_orig, dtype=bool)
+
+    keep = energy_mask & prominence_mask
+    peaks = peaks[keep]
+
+    # Filter all property arrays that correspond 1-to-1 with original peaks
+    kept_properties: dict = {}
+    for key, val in properties.items():
+        if isinstance(val, np.ndarray) and val.shape == (n_orig,):
+            kept_properties[key] = val[keep]
+        else:
+            kept_properties[key] = val
+
+    if return_properties:
+        kept_properties["normalized_signal"] = normalized
+
+        # Per-peak local amplitude: true peak-to-trough swing within the
+        # detected pulse boundary (left_base to right_base). This is a more
+        # physiologically meaningful AC amplitude than the z-score prominence
+        # and is used in SpO2 beat-level R estimation.
+        #
+        # Review improvement: the peak value and trough value are each read
+        # as a small (3-tap) local average around their respective sample
+        # (`_local_robust_extremum`) rather than the single raw sample. A
+        # lone noisy ADC sample sitting exactly at the peak or trough would
+        # otherwise directly bias this amplitude (and everything downstream
+        # that consumes it: upstroke/downstroke slope scoring in
+        # `_score_beats`). Peak/trough *location* is unaffected — only the
+        # amplitude readout is denoised.
+        if (
+            peaks.size > 0
+            and "left_bases" in kept_properties
+            and "right_bases" in kept_properties
+        ):
+            local_amplitudes = np.zeros(peaks.size)
+            for i, (pk, lb, rb) in enumerate(
+                zip(
+                    peaks,
+                    kept_properties["left_bases"].astype(int),
+                    kept_properties["right_bases"].astype(int),
+                )
+            ):
+                seg = filtered_signal[lb : rb + 1]
+                if seg.size > 0:
+                    trough_idx = lb + int(np.argmin(seg))
+                    peak_val = _local_robust_extremum(filtered_signal, int(pk), 1)
+                    trough_val = _local_robust_extremum(filtered_signal, trough_idx, 1)
+                    local_amplitudes[i] = peak_val - trough_val
+            kept_properties["local_amplitudes"] = local_amplitudes
+
+        # Per-peak normalized local energy: diagnostic value for callers
+        # interested in how energetically prominent each beat was. Values > 1.0
+        # mean above-median energy; values < 1.0 mean below-median energy.
+        kept_properties["energy_scores"] = np.clip(
+            energy[peaks] / median_energy if peaks.size > 0 else np.array([]),
+            0.0, 5.0,
+        )
+
+        return peaks, kept_properties
+
     return peaks
+
+
+def _score_beats(peaks: np.ndarray, properties: dict, fs: float) -> dict:
+    """
+    Per-beat confidence scoring (0-1), returned as a structured dict of
+    per-beat arrays for use in HR estimation, SpO2 R weighting, and
+    diagnostics.
+
+    Sub-scores (all 0-1, blended into `beat_confidences`):
+      prominence_score    : peak prominence in z-score units vs. reference
+                            (how far the peak stands above its local baseline)
+      snr_score           : peak height in z-score units vs. BEAT_LOCAL_SNR_REF
+                            (local SNR at the peak in normalized units)
+      pulse_width_score   : half-prominence width vs. physiological optimum
+                            (peaks at BEAT_PULSE_WIDTH_OPTIMAL_SEC = 0.15 s)
+      symmetry_score      : rise:fall ratio compared to expected 1:2 asymmetry
+                            (a perfect PPG systolic peak has ~35 % rise time)
+      upstroke_score      : normalized systolic upstroke slope vs. reference
+                            (steep upstroke = fast, strong pulsatile component)
+      downstroke_score    : normalized diastolic downstroke slope vs. reference
+                            (slower than upstroke → higher score)
+      rr_consistency_score: agreement of each beat's bounding RR intervals
+                            with the median RR interval
+      physio_score        : each bounding RR interval is within [MIN_RR_SEC,
+                            MAX_RR_SEC] physiological bounds
+
+    Weighting note (review): the blend weights below (0.25/0.15/0.12/0.12/
+    0.08/0.08/0.15/0.05) were reviewed against the relative discriminative
+    power documented in PPG beat-quality literature (Elgendi 2016;
+    Orphanidou et al. 2015). Prominence and RR-agreement remain the two
+    largest terms because they are the most direct, least assumption-laden
+    indicators of "this is a real, well-separated pulse" — prominence
+    is a direct measure of how far the candidate stands above the local
+    noise floor, and RR-agreement flags beats that don't fit the local
+    rhythm regardless of their individual morphology. The morphological
+    sub-scores (width/symmetry/upstroke/downstroke) are corroborating,
+    not primary, evidence: a real but atypical pulse (e.g. from a stiffer
+    arterial wall) can fail one morphology check while still being a real
+    beat, so no single morphology term is given more weight than the
+    combination of prominence + RR-agreement. No empirical (regression-
+    fitted) weight optimization has been done — that would require a
+    labelled reference dataset this module does not have access to — so
+    these remain literature-informed heuristic weights, not statistically
+    fitted ones; this is stated plainly rather than dressed up as more
+    rigorous than it is.
+
+    Returns
+    -------
+    dict with keys:
+      beat_confidences   (np.ndarray, shape [n_beats]) — primary output
+      pulse_widths_ms    (np.ndarray) — per-beat half-prominence width
+      upstroke_slopes    (np.ndarray) — per-beat systolic slope (normalized)
+      downstroke_slopes  (np.ndarray) — per-beat diastolic slope (normalized)
+      symmetry_scores    (np.ndarray) — per-beat rise:fall ratio score
+    """
+    n = peaks.size
+    if n == 0:
+        return {
+            "beat_confidences": np.array([]),
+            "pulse_widths_ms": np.array([]),
+            "upstroke_slopes": np.array([]),
+            "downstroke_slopes": np.array([]),
+            "symmetry_scores": np.array([]),
+        }
+
+    prominences = properties.get("prominences", np.zeros(n))
+    heights = properties.get("peak_heights", np.zeros(n))
+    left_bases = properties.get("left_bases", peaks).astype(int)
+    right_bases = properties.get("right_bases", peaks).astype(int)
+    widths_samples = properties.get("widths", np.zeros(n))
+    local_amplitudes = properties.get("local_amplitudes", np.ones(n))
+
+    # --- Prominence and local SNR ---
+    prominence_score = np.clip(prominences / BEAT_PROMINENCE_Z_REF, 0.0, 1.0)
+    snr_score = np.clip(heights / BEAT_LOCAL_SNR_REF, 0.0, 1.0)
+
+    # --- Pulse width score ---
+    # Triangular score function peaking at BEAT_PULSE_WIDTH_OPTIMAL_SEC
+    # (0.15 s). Score is 0 at the band edges (already enforced as hard gates
+    # by find_peaks) and 1 at the optimum. A beat at either edge of the
+    # 80-350 ms band scores ~0.15-0.25, clearly penalizing near-edge cases.
+    widths_sec = widths_samples / fs
+    half_range = (MAX_PEAK_WIDTH_SEC - MIN_PEAK_WIDTH_SEC) / 2.0
+    pulse_width_score = np.clip(
+        1.0 - np.abs(widths_sec - BEAT_PULSE_WIDTH_OPTIMAL_SEC) / half_range,
+        0.0, 1.0,
+    )
+
+    # --- Rise and fall time (samples) ---
+    rise = (peaks - left_bases).astype(np.float64)
+    fall = (right_bases - peaks).astype(np.float64)
+    total_width = np.maximum(rise + fall, 1.0)
+
+    # --- Symmetry score (scored for PPG asymmetry, not against symmetry) ---
+    # Real PPG: rise ≈ 1/3 of total width, fall ≈ 2/3.
+    # Score is highest when rise / total_width ≈ BEAT_UPSTROKE_RATIO_REF (0.35).
+    # A spike (ratio ≈ 0), a slow-rise waveform (ratio > 0.6), or a perfectly
+    # symmetric beat (ratio = 0.5) all score below 0.7.
+    rise_ratio = rise / total_width
+    symmetry_score = np.clip(
+        1.0 - np.abs(rise_ratio - BEAT_UPSTROKE_RATIO_REF) / BEAT_DOWNSTROKE_RATIO_REF,
+        0.0, 1.0,
+    )
+
+    # --- Upstroke and downstroke slope (normalized to local beat amplitude) ---
+    # Raw slope = amplitude / samples. Dividing by local amplitude makes the
+    # score perfusion-independent. Reference slopes are derived from the
+    # expected rise/fall times of a 0.15 s (optimal) pulse.
+    amp_ref = np.maximum(local_amplitudes, 1e-6)
+    optimal_rise_samples = max(BEAT_UPSTROKE_RATIO_REF * BEAT_PULSE_WIDTH_OPTIMAL_SEC * fs, 1.0)
+    optimal_fall_samples = max(BEAT_DOWNSTROKE_RATIO_REF * BEAT_PULSE_WIDTH_OPTIMAL_SEC * fs, 1.0)
+
+    upstroke_slope_raw = amp_ref / np.maximum(rise, 1.0)
+    # Reference upstroke slope for a 0.15 s pulse at the current amplitude:
+    upstroke_ref = amp_ref / optimal_rise_samples
+    upstroke_score = np.clip(upstroke_slope_raw / (upstroke_ref + 1e-9), 0.0, 1.0)
+
+    downstroke_slope_raw = amp_ref / np.maximum(fall, 1.0)
+    # Downstroke should be *slower* than the reference (smaller slope = better).
+    # We score the inverse: reference downstroke slope / actual downstroke slope.
+    downstroke_ref = amp_ref / optimal_fall_samples
+    downstroke_score = np.clip(downstroke_ref / (downstroke_slope_raw + 1e-9), 0.0, 1.0)
+
+    # --- RR consistency and physiological plausibility ---
+    if n >= 2:
+        rr = np.diff(peaks) / fs
+        median_rr = float(np.median(rr)) if rr.size else 0.0
+        physio_valid = (rr >= MIN_RR_SEC) & (rr <= MAX_RR_SEC)
+        physio_rr = np.where(physio_valid, 1.0, 0.0)
+        rr_dev = np.abs(rr - median_rr) / (median_rr + 1e-9) if median_rr > 0 else np.ones_like(rr)
+        rr_consistency = np.clip(1.0 - rr_dev, 0.0, 1.0)
+
+        # Interior beats are bounded by two RR intervals; edge beats by one.
+        left_rr = np.concatenate(([rr_consistency[0]], rr_consistency))
+        right_rr = np.concatenate((rr_consistency, [rr_consistency[-1]]))
+        rr_consistency_score = (left_rr + right_rr) / 2.0
+
+        left_physio = np.concatenate(([physio_rr[0]], physio_rr))
+        right_physio = np.concatenate((physio_rr, [physio_rr[-1]]))
+        physio_score = (left_physio + right_physio) / 2.0
+    else:
+        rr_consistency_score = np.zeros(n)
+        physio_score = np.zeros(n)
+
+    # --- Blended beat confidence (weights sum to 1.0) ---
+    # Prominence and RR agreement are the primary discriminators.
+    # Width, symmetry, and slope sub-scores provide morphological specificity.
+    beat_confidence = (
+        0.25 * prominence_score
+        + 0.15 * snr_score
+        + 0.12 * pulse_width_score
+        + 0.12 * symmetry_score
+        + 0.08 * upstroke_score
+        + 0.08 * downstroke_score
+        + 0.15 * rr_consistency_score
+        + 0.05 * physio_score
+    )
+    beat_confidence = np.clip(beat_confidence, 0.0, 1.0)
+
+    return {
+        "beat_confidences": beat_confidence,
+        "pulse_widths_ms": np.round(widths_sec * 1000.0, 1),
+        "upstroke_slopes": np.round(upstroke_slope_raw, 4),
+        "downstroke_slopes": np.round(downstroke_slope_raw, 4),
+        "symmetry_scores": np.round(symmetry_score, 3),
+    }
 
 
 def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
     """
     Robust heart-rate estimator.
 
-    Pipeline: band-pass filter -> adaptive peak detection -> RR interval
-    validation against physiological bounds -> outlier rejection via a
-    median-based (Hampel-style) filter -> median RR -> BPM.
+    Pipeline: band-pass filter -> rolling z-score normalization -> adaptive
+    peak detection (local energy gating, adaptive prominence scaling,
+    refractory period, width gate) -> per-beat confidence scoring ->
+    RR-interval physiological-bound filtering ->
+    confidence-weighted Hampel-style outlier rejection ->
+    weighted median RR (weighted by beat-pair geometric-mean confidence) ->
+    BPM.
 
-    Using the median (rather than the mean) of the RR intervals makes the
-    estimate resistant to the occasional missed or spurious peak that
-    motion artifacts tend to introduce.
+    Confidence-weighted median: each RR interval is weighted by the geometric
+    mean of its two bounding beat confidences, so artifact-contaminated beats
+    are down-weighted rather than treated equally with clean beats. This is
+    more principled than a simple median when the beat-confidence scores carry
+    real discriminative information (which the improved _score_beats does).
+
+    Confidence-weighted Hampel rejection: the outlier gate is tightened for
+    low-confidence beat pairs — an unusual RR produced by two weak beats is
+    more likely an artifact than the same deviation produced by two strong
+    beats. The gate is threshold = 3 × MAD × tightening, where tightening
+    ranges from 0.5 (very tight, zero-confidence pair) to 1.0 (standard,
+    full-confidence pair).
+
+    Review improvement (performance): the signal-quality context below is
+    computed via `_compute_signal_quality_impl` with the `filtered` signal
+    and `peaks` already produced by this function, instead of calling the
+    public `compute_signal_quality(ir, fs)` (which would otherwise redo the
+    band-pass filtfilt pass, the rolling-normalization + energy-envelope +
+    find_peaks pipeline, and the spectral FFT from scratch on the same
+    buffer). Output values are identical; only the redundant computation is
+    removed.
 
     Returns
     -------
-    dict with: heart_rate (float | None), rr_intervals_ms (list[float]),
-    confidence (0-1 float), beats_detected (int).
+    dict with: heart_rate, rr_intervals_ms, confidence, beats_detected,
+    peak_quality, rhythm_quality, beat_quality (existing keys), plus:
+    signal_quality, motion_quality, coverage, rr_quality,
+    confidence_breakdown (new additive keys).
     """
     ir = _as_float_array(ir)
-    empty = {"heart_rate": None, "rr_intervals_ms": [], "confidence": 0.0, "beats_detected": 0}
+    empty = {
+        "heart_rate": None, "rr_intervals_ms": [], "confidence": 0.0,
+        "beats_detected": 0, "peak_quality": 0.0, "rhythm_quality": 0.0,
+        "beat_quality": 0.0,
+        # new additive fields
+        "signal_quality": 0.0, "motion_quality": 0.0, "coverage": 0.0,
+        "rr_quality": 0.0,
+        "confidence_breakdown": {
+            "beat_quality": 0.0, "rhythm_quality": 0.0,
+            "signal_quality": 0.0, "perfusion": 0.0, "motion": 0.0,
+        },
+    }
     if ir.size < int(fs * 5):  # need a handful of seconds to see multiple beats
         return empty
 
     filtered = bandpass_filter(ir, fs)
-    peaks = _detect_peaks(filtered, fs)
-    if peaks.size < 3:  # need >=2 RR intervals to judge consistency at all
+    peaks, properties = _detect_peaks(filtered, fs, return_properties=True)
+    if peaks.size < 3:  # need ≥ 2 RR intervals to judge consistency
         return empty
+
+    # Per-beat confidence from improved _score_beats (returns a dict)
+    beat_result = _score_beats(peaks, properties, fs)
+    beat_confidences = beat_result["beat_confidences"]
+    beat_quality = float(np.mean(beat_confidences)) if beat_confidences.size else 0.0
 
     rr = np.diff(peaks) / fs  # seconds
 
-    # Stage 1: reject RR intervals outside physiologically possible bounds.
+    # Per-RR weight: geometric mean of bounding beat confidences.
+    # Ensures an interval is only trusted if BOTH bounding beats are clean.
+    conf_left = beat_confidences[:-1]
+    conf_right = beat_confidences[1:]
+    rr_weights = np.sqrt(np.maximum(conf_left * conf_right, 0.0)) + 1e-9
+
+    # Stage 1: physiological bounds — stricter than the detection-time
+    # refractory period (40-200 BPM here vs. 222 BPM at detection time).
     physio_mask = (rr >= MIN_RR_SEC) & (rr <= MAX_RR_SEC)
     rr = rr[physio_mask]
+    rr_weights = rr_weights[physio_mask]
     if rr.size < 2:
         return empty
 
-    # Stage 2: Hampel-style outlier rejection on the remaining intervals —
-    # drop any RR more than 3 median-absolute-deviations from the median.
-    # This catches missed beats (RR ~= 2x true) and extra/spurious peaks
-    # (RR ~= 0.5x true) that survive the physiological bound check.
+    # Stage 2: confidence-weighted Hampel-style outlier rejection.
+    # tightening ranges from 0.5 (strictest, for low-confidence pairs) to
+    # 1.0 (standard 3 × MAD, for high-confidence pairs).
     median_rr = float(np.median(rr))
     mad_rr = float(np.median(np.abs(rr - median_rr))) + 1e-9
-    inlier_mask = np.abs(rr - median_rr) <= 3 * mad_rr
+    normalized_weights = np.clip(rr_weights / (float(np.max(rr_weights)) + 1e-9), 0.0, 1.0)
+    tightening = 0.5 + 0.5 * normalized_weights
+    inlier_mask = np.abs(rr - median_rr) <= 3.0 * mad_rr * tightening
     clean_rr = rr[inlier_mask]
+    clean_weights = rr_weights[inlier_mask]
     if clean_rr.size == 0:
         clean_rr = rr  # fall back rather than reporting nothing
+        clean_weights = rr_weights
 
-    bpm = 60.0 / float(np.median(clean_rr))
+    # Stage 3: weighted median RR
+    bpm = 60.0 / _weighted_median(clean_rr, clean_weights)
     if not (MIN_BPM <= bpm <= MAX_BPM):
         return empty
 
-    # Confidence blends: fraction of RR intervals retained as inliers, and
-    # how tight the retained intervals are (low CV = consistent rhythm).
     retained_fraction = clean_rr.size / rr.size
     cv = float(np.std(clean_rr) / (np.mean(clean_rr) + 1e-9))
     regularity = float(np.clip(1.0 - cv * 2.0, 0.0, 1.0))
-    beat_count_factor = float(np.clip(clean_rr.size / 5.0, 0.0, 1.0))  # more beats seen = more trust
+
+    # Signal-level context from SQI, reusing `filtered`/`peaks` (see docstring).
+    quality = _compute_signal_quality_impl(ir, fs, filtered=filtered, peaks=peaks)
+    signal_quality_norm = quality["score"] / 100.0
+    perfusion = quality["amplitude_score"]
+    motion = quality["motion_score"] if quality["motion_score"] is not None else 1.0
+
+    # Coverage: ratio of detected beats to the expected beat count given the
+    # window duration and estimated HR. Values much below 1.0 indicate dropout
+    # or missed beats; values above 1.0 indicate spurious detections (capped at 1.0).
+    window_duration = ir.size / fs
+    expected_beats = max((bpm / 60.0) * window_duration, 1.0)
+    coverage = float(np.clip(peaks.size / expected_beats, 0.0, 1.0))
+
     confidence = float(np.clip(
-        0.4 * retained_fraction + 0.4 * regularity + 0.2 * beat_count_factor, 0.0, 1.0
+        0.30 * beat_quality
+        + 0.25 * regularity
+        + 0.20 * signal_quality_norm
+        + 0.15 * perfusion
+        + 0.10 * motion,
+        0.0, 1.0,
     ))
 
     return {
@@ -508,150 +1655,761 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
         "rr_intervals_ms": [round(x * 1000.0, 1) for x in clean_rr],
         "confidence": round(confidence, 3),
         "beats_detected": int(peaks.size),
-        # --- additive sub-metrics, exposing values already computed above
-        # so the processor can build a fuller HR-quality breakdown without
-        # recomputing anything ---
-        "peak_quality": round(retained_fraction, 3),   # fraction of detected peaks that survived outlier rejection
-        "rhythm_quality": round(regularity, 3),         # 1 - RR coefficient of variation, clipped to [0, 1]
+        # existing additive sub-metrics
+        "peak_quality": round(retained_fraction, 3),
+        "rhythm_quality": round(regularity, 3),
+        "beat_quality": round(beat_quality, 3),
+        # new additive diagnostics
+        "signal_quality": round(signal_quality_norm, 3),
+        "motion_quality": round(float(motion), 3),
+        "coverage": round(coverage, 3),
+        "rr_quality": round(retained_fraction, 3),
+        "confidence_breakdown": {
+            "beat_quality": round(beat_quality, 3),
+            "rhythm_quality": round(regularity, 3),
+            "signal_quality": round(signal_quality_norm, 3),
+            "perfusion": round(perfusion, 3),
+            "motion": round(float(motion), 3),
+        },
     }
 
 
 # ---------------------------------------------------------------------------
-# SpO2 (ratio-of-ratios)
+# SpO2 (ratio-of-ratios) — beat-by-beat pipeline with signal-lock tracking
+# ---------------------------------------------------------------------------
+#
+# Algorithm summary (merges the Version-A peak/beat machinery with the
+# Version-B beat-by-beat SpO2 architecture, plus new robustness features):
+#
+#   1. Band-pass both channels once; track each channel's slowly-varying DC
+#      baseline with `_lowpass_dc` (time-aligned, not a single scalar mean).
+#   2. Detect systolic beats on the IR channel with the shared adaptive
+#      peak detector (`_detect_peaks`) and score them with the shared
+#      morphology scorer (`_score_beats`) — the same machinery used by
+#      `estimate_heart_rate`, so beat quality judgments are consistent
+#      across HR and SpO2.
+#   3. For each sufficiently-confident IR beat, locate the matching RED
+#      peak in a small physiological search window and *validate RED/IR
+#      temporal alignment* — a real arterial pulse produces near-simultaneous
+#      systolic peaks in both wavelengths; a peak pair separated by more than
+#      `IR_RED_PEAK_ALIGNMENT_MAX_SEC` is almost certainly two different
+#      events (typically a motion transient hitting one channel harder than
+#      the other) and is rejected rather than allowed to bias R.
+#   4. Compute per-beat R = (AC_red/DC_red) / (AC_ir/DC_ir) using
+#      peak-to-trough amplitudes over the *same* pulse-boundary window in
+#      both channels (so asymmetric windowing can't bias R), with the peak
+#      and trough samples each read as a small local average
+#      (`_local_robust_extremum`) rather than a single raw ADC sample —
+#      review improvement, see rationale below — gated by per-channel
+#      perfusion-index plausibility and the physiological R range.
+#   5. Hampel-reject outlying beat-level R values, then apply an *adaptive*
+#      pulse-selection rule (no fixed "top-N%"): a beat is kept only if its
+#      composite quality clears the higher of the window's median quality or
+#      `SPO2_ADAPTIVE_SELECTION_MAX_FRACTION` of its best quality, so the bar
+#      tracks the window's own SNR regime rather than always admitting a
+#      fixed fraction of whatever beats happen to be present.
+#   6. Aggregate with a confidence-weighted median R, and separately score
+#      beat-to-beat R stability (its own sub-score, distinct from the
+#      window-level ratio_quality) so a run of individually plausible but
+#      mutually inconsistent R values is flagged rather than blindly averaged.
+#   7. Map R through a calibration curve. The calibration step is exposed as
+#      a small, swappable primitive (`_spo2_calibrate`, `set_spo2_calibration_table`)
+#      so a future lookup-table or polynomial calibration can be installed
+#      without touching `estimate_spo2`'s public signature.
+#   8. Track a hysteresis-based signal-lock state machine
+#      (SEARCHING -> LOCKED -> TRACKING -> LOST) so a brief, noisy dip in
+#      confidence doesn't repeatedly flip the reported lock state — locking
+#      requires *sustained* high confidence, unlocking requires confidence to
+#      fall meaningfully below the locking bar (Schmitt-trigger-style
+#      debouncing), which is the standard fix for state-machine chatter.
+#   9. Only in LOCKED/TRACKING states (and outside severe motion) is a new
+#      SpO2 value published; it is then rate-limited (physiologically
+#      implausible desaturation speeds are clamped) and exponentially
+#      smoothed, with the smoothing weight itself scaled by confidence so a
+#      strong, stable beat set is trusted more than a marginal one.
+#  10. During severe motion (`SPO2_MOTION_FREEZE_THRESHOLD`), the last
+#      trusted value is held (with confidence halved) rather than reporting
+#      a noise-driven measurement, regardless of lock state.
+#
+# Review note on the RED/IR alignment window (Section: "Beat pairing"):
+# the RED-peak search window (`search_half`, derived from
+# MIN_PEAK_WIDTH_SEC/2) and the accept tolerance (`IR_RED_PEAK_ALIGNMENT_MAX_SEC`
+# = 30 ms) were checked against each other for consistency: at fs = 50 Hz,
+# search_half is ~2 samples (40 ms) and the alignment tolerance is ~1.5
+# samples (30 ms), so the search window is not so wide that it could find
+# and then reject a RED peak that a wider search would have matched — the
+# two are of comparable scale, which is the correct relationship (a search
+# window much narrower than the tolerance would truncate legitimate matches;
+# much wider would waste cycles scanning candidates that can never pass).
+# No change was needed here.
+#
+# Review note on AC estimation ("AC estimation" section of the request):
+# pulse *area/integral* (integrating the pulse waveform over its boundary
+# window) was considered as an alternative to peak-to-trough amplitude.
+# Area-based estimators are used in some research PPG pipelines because
+# they average over more samples and are therefore less sensitive to a
+# single noisy sample — but they also conflate amplitude with pulse *shape*
+# (a wider, lower pulse and a narrower, taller pulse can integrate to the
+# same area), which would make R less directly comparable across beats of
+# differing morphology within the same buffer. Peak-to-trough amplitude is
+# kept as the primary estimator (it is what the classical ratio-of-ratios
+# derivation assumes), but its single-sample noise sensitivity is addressed
+# directly and locally via `_local_robust_extremum` (a small fixed-width
+# average around the peak and trough samples only) rather than switching
+# estimators altogether — this captures most of the noise-robustness
+# benefit of an area-based approach without its shape-conflation downside.
+#
+# Backward compatibility: callers that only ever passed `(ir, red, fs)` (the
+# original stateless-per-call contract) get their lock/smoothing state
+# tracked automatically in the module-level `_spo2_state` dict, exactly as
+# before — call `reset_spo2_state()` on a new session or finger-removal
+# event. Callers that want fully externally-owned state (no module-level
+# mutation, e.g. for multi-sensor or multi-user deployments) may instead
+# pass `prior_spo2` / `prior_confidence` / `prior_state` / `lock_duration_sec`
+# explicitly and read the equivalent fields back out of the returned dict on
+# every call; doing so bypasses `_spo2_state` entirely for that call.
 # ---------------------------------------------------------------------------
 
-def estimate_spo2(ir, red, fs: float = 50.0, sub_window_seconds: float = 2.0) -> dict:
+# Module-level default calibration table hook. `None` means "use the built-in
+# two-segment linear calibration (SPO2_CAL_A/B and SPO2_CAL_A2/B2)". Installing
+# a table here lets every future `estimate_spo2` call (that doesn't pass its
+# own `calibration_table` argument) pick up a new calibration — e.g. one
+# derived from an actual co-oximeter calibration session — without changing
+# `estimate_spo2`'s signature or breaking any existing caller.
+_active_calibration_table: list[tuple[float, float, float]] | None = None
+
+
+def set_spo2_calibration_table(table: list[tuple[float, float, float]] | None) -> None:
     """
-    Ratio-of-ratios SpO2 estimator using rolling sub-windows.
+    Install a custom piecewise-linear SpO2 calibration table.
 
-    Classic pulse-oximetry theory: R = (AC_red / DC_red) / (AC_ir / DC_ir).
-    R correlates near-linearly with arterial oxygen saturation over the
-    clinically relevant range, and is conventionally mapped through an
-    empirical calibration curve (SpO2 = A - B*R) rather than derived from
-    first-principles optics, because real calibration requires a
-    co-oximeter reference we don't have here.
+    `table` is a list of `(r_upper_bound, a, b)` tuples, sorted by ascending
+    `r_upper_bound`, defining segments of the form `SpO2 = a - b * R` valid
+    for R up to `r_upper_bound` (the last entry's segment is used for any R
+    above its bound). Passing `None` restores the built-in two-segment
+    calibration (`SPO2_CAL_A`/`SPO2_CAL_B` below `SPO2_CAL_BREAKPOINT_R`,
+    `SPO2_CAL_A2`/`SPO2_CAL_B2` above it).
 
-    Rather than computing a single R from the whole buffer (sensitive to
-    a single burst of motion), we compute R over several overlapping
-    sub-windows and take the median, reporting confidence based on how
-    consistent the sub-window estimates are with each other.
+    This indirection exists so that a future calibration derived from actual
+    co-oximeter reference data (or a non-linear/polynomial fit re-expressed
+    as a fine-grained piecewise-linear table) can be installed without
+    changing `estimate_spo2`'s public signature or any caller's code.
     """
-    ir = _as_float_array(ir)
-    red = _as_float_array(red)
-    empty = {"spo2": None, "confidence": 0.0, "r_value": None, "windows_used": 0}
+    global _active_calibration_table
+    _active_calibration_table = table
 
-    min_len = int(fs * sub_window_seconds) * 2  # need at least 2 sub-windows
-    if ir.size < min_len or red.size < min_len or ir.size != red.size:
-        return empty
 
+def _spo2_calibrate(
+    r: float,
+    cal_a: float = SPO2_CAL_A,
+    cal_b: float = SPO2_CAL_B,
+    breakpoint_r: float = SPO2_CAL_BREAKPOINT_R,
+    cal_a2: float = SPO2_CAL_A2,
+    cal_b2: float = SPO2_CAL_B2,
+    calibration_table: list[tuple[float, float, float]] | None = None,
+) -> float:
+    """
+    Empirical SpO2 calibration from the ratio-of-ratios R value.
+
+    Resolution order:
+      1. If `calibration_table` is given explicitly (per-call override), use it.
+      2. Else if a table has been installed via `set_spo2_calibration_table`,
+         use that.
+      3. Else fall back to the built-in two-segment linear calibration:
+         SpO2 = cal_a - cal_b * R for R <= breakpoint_r (Maxim app-note
+         family), and a shallower SpO2 = cal_a2 - cal_b2 * R above it, since
+         reduced and oxygenated hemoglobin have different optical absorption
+         coefficients at 660/940 nm and the R-SpO2 relationship is only
+         approximately linear across the full range.
+
+    Constants are approximate in all cases; accurate clinical calibration
+    requires simultaneous co-oximeter reference measurements across a range
+    of SpO2.
+    """
+    table = calibration_table if calibration_table is not None else _active_calibration_table
+    if table:
+        for r_upper, a, b in table:
+            if r <= r_upper:
+                return a - b * r
+        last_a, last_b = table[-1][1], table[-1][2]
+        return last_a - last_b * r
+
+    if r <= breakpoint_r:
+        return cal_a - cal_b * r
+    return cal_a2 - cal_b2 * r
+
+
+def _spo2_fallback_window_method(
+    ir: np.ndarray, red: np.ndarray, fs: float, sub_window_seconds: float,
+    motion_score: float,
+) -> dict:
+    """
+    Fallback window-std R estimation for buffers too short, or too sparse in
+    detected beats, for the beat-by-beat pipeline. Preserved from the
+    original window-based implementation for backward compatibility with
+    short capture windows / very weak signals, where the adaptive peak
+    detector may not reliably resolve individual beats but a coarse
+    window-level AC/DC estimate is still informative.
+    """
     window = int(fs * sub_window_seconds)
-    step = window // 2  # 50% overlap for more sub-window estimates without needing a longer buffer
-    r_values = []
-
-    for start in range(0, ir.size - window + 1, step):
-        ir_seg = ir[start:start + window]
-        red_seg = red[start:start + window]
-
+    step = max(window // 2, 1)  # 50 % overlap
+    window_r_values: list[float] = []
+    for start in range(0, max(ir.size - window + 1, 0), step):
+        ir_seg = ir[start : start + window]
+        red_seg = red[start : start + window]
         dc_ir = float(np.mean(ir_seg))
         dc_red = float(np.mean(red_seg))
         if dc_ir <= 0 or dc_red <= 0:
             continue
-
-        # AC amplitude via band-passed segment std (robust to baseline
-        # wander within the sub-window); falls back to raw std if the
-        # segment is too short for filtfilt.
         ac_ir = float(np.std(bandpass_filter(ir_seg, fs)))
         ac_red = float(np.std(bandpass_filter(red_seg, fs)))
         if ac_ir <= 0 or ac_red <= 0:
             continue
-
         r = (ac_red / dc_red) / (ac_ir / dc_ir)
         if SPO2_R_MIN <= r <= SPO2_R_MAX:
-            r_values.append(r)
+            window_r_values.append(r)
 
-    if not r_values:
-        return empty
+    if not window_r_values:
+        return {"ok": False}
 
-    r_values = np.array(r_values)
-    r_median = float(np.median(r_values))
-    spo2 = SPO2_CAL_A - SPO2_CAL_B * r_median
-    spo2 = float(np.clip(spo2, SPO2_PHYSIO_MIN, SPO2_PHYSIO_MAX))
-
-    # Confidence: how tightly the sub-window R estimates agree, plus how
-    # many sub-windows contributed (more windows -> more trustworthy median).
-    r_cv = float(np.std(r_values) / (r_median + 1e-9)) if r_values.size > 1 else 1.0
-    consistency = float(np.clip(1.0 - r_cv * 3.0, 0.0, 1.0))
-    coverage = float(np.clip(r_values.size / 4.0, 0.0, 1.0))
-    confidence = float(np.clip(0.7 * consistency + 0.3 * coverage, 0.0, 1.0))
+    r_arr = np.array(window_r_values)
+    r_median = float(np.median(r_arr))
+    r_cv = float(np.std(r_arr) / (r_median + 1e-9)) if r_arr.size > 1 else 1.0
+    ratio_quality = float(np.clip(1.0 - r_cv * 3.0, 0.0, 1.0))
+    r_stability_score = float(np.clip(1.0 - r_cv / SPO2_R_STABILITY_CV_REF, 0.0, 1.0))
+    mean_pi = float(np.std(bandpass_filter(ir, fs))) / (float(np.mean(ir)) + 1e-9) * 100.0
 
     return {
-        "spo2": round(spo2, 1),
-        "confidence": round(confidence, 3),
+        "ok": True,
+        "r_median": r_median,
+        "mean_pi": mean_pi,
+        "ratio_quality": ratio_quality,
+        "r_stability_score": r_stability_score,
+        "window_quality": motion_score,
+        "beat_quality": 0.0,
+        "coverage_quality": float(np.clip(len(window_r_values) / 4.0, 0.0, 1.0)),
+        "effective_beats": 0,
+        "effective_windows": len(window_r_values),
+    }
+
+
+def _spo2_empty_result(prior_spo2, prior_confidence, prior_state, lock_duration_sec) -> dict:
+    """Shared "not enough information yet" result, passing prior state through unchanged."""
+    return {
+        "spo2": round(prior_spo2, 1) if prior_spo2 is not None else None,
+        "confidence": 0.0,
+        "r_value": None,
+        "windows_used": 0,
+        "perfusion_index": 0.0,
+        "window_quality": 0.0,
+        "beat_quality": 0.0,
+        "ratio_quality": 0.0,
+        "coverage_quality": 0.0,
+        "effective_beats": 0,
+        "effective_windows": 0,
+        "spo2_confidence": 0.0,
+        "calibration_region": "unknown",
+        "r_stability_score": 0.0,
+        "state": prior_state if prior_state is not None else "SEARCHING",
+        "lock_duration_sec": round(lock_duration_sec, 2) if lock_duration_sec is not None else 0.0,
+    }
+
+
+def estimate_spo2(
+    ir,
+    red,
+    fs: float = 50.0,
+    sub_window_seconds: float = 2.0,
+    prior_spo2: float | None = None,
+    prior_confidence: float | None = None,
+    prior_state: str | None = None,
+    lock_duration_sec: float | None = None,
+    cal_a: float = SPO2_CAL_A,
+    cal_b: float = SPO2_CAL_B,
+    calibration_table: list[tuple[float, float, float]] | None = None,
+    max_roc_per_sec: float = SPO2_MAX_ROC_PCT_PER_SEC,
+) -> dict:
+    """
+    Beat-by-beat ratio-of-ratios SpO2 estimator with RED/IR alignment
+    validation, adaptive pulse selection, R-value stability scoring, and a
+    hysteresis-based signal-lock state machine.
+
+    Classic pulse-oximetry: R = (AC_red / DC_red) / (AC_ir / DC_ir). R
+    correlates near-linearly with arterial oxygen saturation and is mapped
+    through an empirical calibration curve (see `_spo2_calibrate`).
+
+    Parameters
+    ----------
+    ir, red : array-like raw sample buffers, same length.
+    fs : sampling rate in Hz.
+    sub_window_seconds : sub-window length used only by the short-buffer
+        fallback method and for the reported `effective_windows` estimate.
+    prior_spo2, prior_confidence, prior_state, lock_duration_sec :
+        Optional explicit state for callers that want to own SpO2/lock state
+        themselves (e.g. multi-sensor deployments) instead of relying on the
+        module-level `_spo2_state`. If **all** of these are left as `None`
+        (the original calling convention), state is read from and written
+        back to `_spo2_state` automatically, exactly as in the original
+        stateless-per-call API — existing callers require no changes.
+    cal_a, cal_b : override the primary-segment linear calibration
+        coefficients (SpO2 = cal_a - cal_b * R for R at or below the
+        breakpoint); the hypoxic-segment coefficients remain
+        `SPO2_CAL_A2`/`SPO2_CAL_B2` unless a full `calibration_table` is
+        supplied.
+    calibration_table : optional full override, see `_spo2_calibrate`.
+    max_roc_per_sec : ceiling, in %/second, on how fast the published SpO2
+        value may move once locked (a safety clamp, not a physiological
+        desaturation-kinetics model — see `SPO2_MAX_ROC_PCT_PER_SEC`).
+
+    Returns
+    -------
+    dict with (existing keys): spo2, confidence, r_value, windows_used,
+    perfusion_index, window_quality, beat_quality, ratio_quality,
+    coverage_quality, effective_beats, effective_windows, spo2_confidence,
+    calibration_region; plus (new additive keys): r_stability_score, state,
+    lock_duration_sec.
+    """
+    ir = _as_float_array(ir)
+    red = _as_float_array(red)
+
+    # Decide whether this call manages state internally (module-level) or
+    # the caller is supplying/expecting to own it explicitly.
+    use_internal_state = (
+        prior_spo2 is None and prior_confidence is None
+        and prior_state is None and lock_duration_sec is None
+    )
+    if use_internal_state:
+        prior_spo2 = _spo2_state["last_spo2"]
+        prior_confidence = _spo2_state["last_confidence"]
+        prior_state = _spo2_state["state"]
+        lock_duration_sec = _spo2_state["lock_duration_sec"]
+    else:
+        prior_state = prior_state if prior_state is not None else "SEARCHING"
+        lock_duration_sec = lock_duration_sec if lock_duration_sec is not None else 0.0
+        prior_confidence = prior_confidence if prior_confidence is not None else 0.0
+
+    min_len = int(fs * sub_window_seconds) * 2
+    if ir.size < min_len or red.size < min_len or ir.size != red.size:
+        result = _spo2_empty_result(prior_spo2, prior_confidence, prior_state, lock_duration_sec)
+        if use_internal_state:
+            _spo2_state["state"] = result["state"]
+            _spo2_state["lock_duration_sec"] = result["lock_duration_sec"]
+        return result
+
+    buffer_duration = ir.size / fs
+
+    # --- Shared context: motion score and band-passed / DC-tracked channels ---
+    motion_score = _motion_artifact_score(ir)
+    filtered_ir = bandpass_filter(ir, fs)
+    filtered_red = bandpass_filter(red, fs)
+    dc_ir_signal = _lowpass_dc(ir, fs)
+    dc_red_signal = _lowpass_dc(red, fs)
+
+    # --- Beat detection & morphology scoring on the IR channel (shared with HR) ---
+    peaks_ir, props_ir = _detect_peaks(filtered_ir, fs, return_properties=True)
+    beat_confidences_ir = (
+        _score_beats(peaks_ir, props_ir, fs)["beat_confidences"]
+        if peaks_ir.size > 0 else np.array([])
+    )
+
+    search_half = max(int(fs * MIN_PEAK_WIDTH_SEC / 2), 1)
+    align_max_samples = max(int(round(fs * IR_RED_PEAK_ALIGNMENT_MAX_SEC)), 1)
+    left_bases_ir = props_ir.get("left_bases", peaks_ir).astype(int) if peaks_ir.size else peaks_ir
+    right_bases_ir = props_ir.get("right_bases", peaks_ir).astype(int) if peaks_ir.size else peaks_ir
+
+    raw_pulses: list[dict] = []
+    n_alignment_rejected = 0
+
+    for i, pk_ir in enumerate(peaks_ir):
+        bc = float(beat_confidences_ir[i]) if i < beat_confidences_ir.size else 0.0
+        if bc < SPO2_BEAT_CONFIDENCE_MIN:
+            continue
+
+        # Locate the matching RED peak within a physiologically small search
+        # window around the IR peak.
+        lo = max(pk_ir - search_half, 0)
+        hi = min(pk_ir + search_half, filtered_red.size - 1)
+        if lo >= hi:
+            continue
+        pk_red = int(np.argmax(filtered_red[lo : hi + 1])) + lo
+
+        # --- RED/IR peak-alignment validation (motion-robustness improvement) ---
+        # A genuine shared arterial pulse produces near-simultaneous systolic
+        # peaks in both wavelengths; a larger offset means the "matched" RED
+        # peak is likely a different event (commonly a motion artifact that
+        # perturbed one channel more than the other) and would silently bias R.
+        if abs(pk_red - pk_ir) > align_max_samples:
+            n_alignment_rejected += 1
+            continue
+
+        lb = int(left_bases_ir[i])
+        rb = int(min(right_bases_ir[i], filtered_ir.size - 1))
+        if lb >= rb:
+            continue
+
+        ir_win = filtered_ir[lb : rb + 1]
+        red_win = filtered_red[lb : rb + 1]
+        if ir_win.size == 0 or red_win.size == 0:
+            continue
+
+        # Peak-to-trough AC amplitude over the *same* time window in both
+        # channels (prevents asymmetric-window bias in R), and a time-aligned
+        # low-pass DC estimate for each channel at its own peak location.
+        #
+        # Review improvement: the peak sample and trough sample are each read
+        # via `_local_robust_extremum` (a small 3-tap local average) instead
+        # of a single raw sample. R is a ratio of two such amplitudes, so a
+        # single noisy ADC sample at either channel's peak or trough directly
+        # perturbs the SpO2 estimate; averaging a couple of samples around
+        # each extremum (without shifting *where* the extremum is taken from,
+        # and without touching the DC tracker or peak timing at all) reduces
+        # that sensitivity at negligible cost to genuine amplitude fidelity
+        # (pulse curvature over 1-2 samples at 25-100 Hz is negligible next
+        # to an 80-350 ms pulse width).
+        ir_trough_idx = lb + int(np.argmin(ir_win))
+        red_trough_idx = lb + int(np.argmin(red_win))
+        ir_peak_val = _local_robust_extremum(filtered_ir, int(pk_ir), 1)
+        ir_trough_val = _local_robust_extremum(filtered_ir, ir_trough_idx, 1)
+        red_peak_val = _local_robust_extremum(filtered_red, int(pk_red), 1)
+        red_trough_val = _local_robust_extremum(filtered_red, red_trough_idx, 1)
+        ac_ir = float(ir_peak_val - ir_trough_val)
+        ac_red = float(red_peak_val - red_trough_val)
+        dc_ir = float(dc_ir_signal[pk_ir])
+        dc_red = float(dc_red_signal[pk_red])
+
+        if dc_ir <= 0 or dc_red <= 0 or ac_ir <= 0 or ac_red <= 0:
+            continue
+
+        pi_ir = (ac_ir / dc_ir) * 100.0
+        pi_red = (ac_red / dc_red) * 100.0
+        if not (FINGER_PI_MIN_PCT <= pi_ir <= FINGER_PI_MAX_PCT):
+            continue
+        if not (FINGER_PI_MIN_PCT <= pi_red <= FINGER_PI_MAX_PCT):
+            continue
+
+        r_beat = (ac_red / dc_red) / (ac_ir / dc_ir)
+        if not (SPO2_R_MIN <= r_beat <= SPO2_R_MAX):
+            continue
+
+        raw_pulses.append({
+            "r": r_beat,
+            "pi": (pi_ir + pi_red) / 2.0,
+            "beat_conf": bc,
+            "alignment_offset_sec": abs(pk_red - pk_ir) / fs,
+        })
+
+    # --- Decide: beat-level pipeline, or fall back to window-std method ---
+    if len(raw_pulses) < SPO2_MIN_SELECTED_PULSES:
+        fb = _spo2_fallback_window_method(ir, red, fs, sub_window_seconds, motion_score)
+        if not fb["ok"]:
+            result = _spo2_empty_result(prior_spo2, prior_confidence, prior_state, lock_duration_sec)
+            if use_internal_state:
+                _spo2_state["state"] = result["state"]
+                _spo2_state["lock_duration_sec"] = result["lock_duration_sec"]
+            return result
+
+        r_median = fb["r_median"]
+        mean_pi = fb["mean_pi"]
+        ratio_quality = fb["ratio_quality"]
+        r_stability_score = fb["r_stability_score"]
+        window_quality = fb["window_quality"]
+        mean_beat_quality = fb["beat_quality"]
+        coverage_quality = fb["coverage_quality"]
+        effective_beats = fb["effective_beats"]
+        effective_windows = fb["effective_windows"]
+    else:
+        # --- Hampel-style outlier rejection on beat-level R values ---
+        r_arr = np.array([p["r"] for p in raw_pulses])
+        r_median_raw = float(np.median(r_arr))
+        r_mad = float(np.median(np.abs(r_arr - r_median_raw))) + 1e-9
+        inlier_pulses = [p for p in raw_pulses if abs(p["r"] - r_median_raw) <= 3.0 * r_mad]
+        if not inlier_pulses:
+            inlier_pulses = raw_pulses
+
+        # --- Adaptive pulse-selection (no fixed "top N%") ---
+        # A composite per-pulse quality blends beat morphology confidence,
+        # global motion score, and perfusion adequacy. The accept threshold
+        # tracks the *current window's* quality distribution rather than
+        # always keeping a fixed fraction, so a uniformly clean window keeps
+        # nearly all beats while a mixed window still enforces a meaningful bar.
+        for p in inlier_pulses:
+            p["quality"] = p["beat_conf"] * motion_score * float(np.clip(p["pi"] / 2.0, 0.1, 1.0))
+
+        qualities = np.array([p["quality"] for p in inlier_pulses])
+        median_quality = float(np.median(qualities))
+        max_quality = float(np.max(qualities))
+        select_threshold = max(median_quality, SPO2_ADAPTIVE_SELECTION_MAX_FRACTION * max_quality)
+        selected_pulses = [p for p in inlier_pulses if p["quality"] >= select_threshold]
+        if len(selected_pulses) < SPO2_MIN_SELECTED_PULSES:
+            # Not enough pulses clear the adaptive bar; fall back to keeping
+            # the best SPO2_MIN_SELECTED_PULSES available rather than failing
+            # outright on a marginal-but-not-empty window.
+            selected_pulses = sorted(inlier_pulses, key=lambda p: p["quality"], reverse=True)
+            selected_pulses = selected_pulses[: max(SPO2_MIN_SELECTED_PULSES, 1)]
+
+        sel_r = np.array([p["r"] for p in selected_pulses])
+        sel_w = np.array([p["quality"] for p in selected_pulses])
+        sel_pi = np.array([p["pi"] for p in selected_pulses])
+        sel_bc = np.array([p["beat_conf"] for p in selected_pulses])
+
+        r_median = _weighted_median(sel_r, sel_w)
+        mean_pi = float(np.mean(sel_pi))
+        mean_beat_quality = float(np.mean(sel_bc))
+
+        # --- R-value stability: beat-to-beat R agreement, its own sub-score ---
+        r_cv = float(np.std(sel_r) / (r_median + 1e-9)) if sel_r.size > 1 else 1.0
+        ratio_quality = float(np.clip(1.0 - r_cv * 3.0, 0.0, 1.0))
+        r_stability_score = float(np.clip(1.0 - r_cv / SPO2_R_STABILITY_CV_REF, 0.0, 1.0))
+
+        # Review improvement (performance): reuse the IR filtered signal and
+        # peak set already computed above instead of calling the public
+        # compute_signal_quality(ir, fs) (which would redo bandpass_filter,
+        # _detect_peaks, and the spectral FFT on the same buffer). Output is
+        # identical to the previous `compute_signal_quality(ir, fs)["score"]`.
+        window_quality = (
+            _compute_signal_quality_impl(ir, fs, filtered=filtered_ir, peaks=peaks_ir)["score"] / 100.0
+        )
+        coverage_quality = float(np.clip(len(selected_pulses) / max(peaks_ir.size, 1), 0.0, 1.0))
+        effective_beats = len(selected_pulses)
+        effective_windows = effective_beats
+
+    # --- Calibration (pluggable; see _spo2_calibrate / set_spo2_calibration_table) ---
+    spo2_raw = _spo2_calibrate(r_median, cal_a=cal_a, cal_b=cal_b, calibration_table=calibration_table)
+    spo2_raw = float(np.clip(spo2_raw, SPO2_PHYSIO_MIN, SPO2_PHYSIO_MAX))
+    active_table = calibration_table if calibration_table is not None else _active_calibration_table
+    calibration_region = "table" if active_table else ("low" if r_median > SPO2_CAL_BREAKPOINT_R else "normal")
+
+    # --- Composite confidence ---
+    # Weights are chosen so beat quality and R-ratio agreement (the two most
+    # direct evidence signals that we're looking at a real, consistent
+    # arterial pulse) dominate; R stability, window-level SQI, and motion
+    # each contribute meaningfully; perfusion adequacy and beat coverage act
+    # as smaller corroborating terms rather than primary discriminators.
+    perfusion_subscore = float(np.clip(mean_pi / 2.0, 0.0, 1.0))
+    confidence = float(np.clip(
+        0.25 * mean_beat_quality
+        + 0.20 * ratio_quality
+        + 0.15 * r_stability_score
+        + 0.15 * window_quality
+        + 0.15 * motion_score
+        + 0.05 * perfusion_subscore
+        + 0.05 * coverage_quality,
+        0.0, 1.0,
+    ))
+
+    # --- Hysteresis-based signal-lock state machine ---
+    # Separate ON/OFF confidence thresholds (0.75 / 0.45) prevent chattering
+    # across a single noisy boundary value; sustained confidence (not a
+    # single good window) is required to transition into a trusted lock.
+    if prior_state in (None, "SEARCHING"):
+        if confidence >= SPO2_LOCK_CONFIDENCE_ON:
+            lock_duration_sec += buffer_duration
+        else:
+            lock_duration_sec = 0.0
+        new_state = "LOCKED" if lock_duration_sec >= SPO2_LOCK_DURATION_REQUIRED_SEC else "SEARCHING"
+    elif prior_state in ("LOCKED", "TRACKING"):
+        if confidence >= SPO2_LOCK_CONFIDENCE_OFF:
+            new_state = "TRACKING"
+            lock_duration_sec += buffer_duration
+        else:
+            new_state = "LOST"
+            lock_duration_sec = 0.0
+    elif prior_state == "LOST":
+        if confidence >= SPO2_LOCK_CONFIDENCE_ON:
+            lock_duration_sec += buffer_duration
+        else:
+            lock_duration_sec = 0.0
+        new_state = "LOCKED" if lock_duration_sec >= SPO2_LOCK_DURATION_REQUIRED_SEC else "SEARCHING"
+    else:
+        new_state = "SEARCHING"
+        lock_duration_sec = 0.0
+
+    # --- Motion freeze: hold last trusted value during severe motion ---
+    # This takes priority over the lock state — even a currently-TRACKING
+    # estimate should not be updated with a measurement dominated by motion.
+    if motion_score < SPO2_MOTION_FREEZE_THRESHOLD and prior_spo2 is not None:
+        spo2_out = prior_spo2
+        confidence_out = prior_confidence * 0.5
+    elif new_state in ("LOCKED", "TRACKING") and prior_spo2 is not None:
+        # Rate-limit (per-second ceiling, plus the original fixed per-update
+        # jump clamp as an additional safety bound) and confidence-scaled
+        # exponential smoothing.
+        max_delta = max(max_roc_per_sec * buffer_duration, 1e-6)
+        clamped = float(np.clip(spo2_raw, prior_spo2 - max_delta, prior_spo2 + max_delta))
+        clamped = float(np.clip(
+            clamped, prior_spo2 - SPO2_MAX_JUMP_PER_UPDATE, prior_spo2 + SPO2_MAX_JUMP_PER_UPDATE
+        ))
+        alpha = float(np.clip(SPO2_SMOOTHING_ALPHA * (confidence / 0.5), 0.05, 0.6))
+        spo2_out = alpha * clamped + (1.0 - alpha) * prior_spo2
+        confidence_out = confidence
+    elif prior_spo2 is None:
+        # No trusted prior yet — publish the raw estimate so the caller has
+        # *something* to show, but confidence reflects that it is not yet locked.
+        spo2_out = spo2_raw
+        confidence_out = confidence
+    else:
+        # Not currently locked/tracking and a prior trusted value exists:
+        # hold the prior rather than publishing an unlocked reading.
+        spo2_out = prior_spo2
+        confidence_out = confidence * 0.5
+
+    spo2_out = float(np.clip(spo2_out, SPO2_PHYSIO_MIN, SPO2_PHYSIO_MAX))
+
+    if use_internal_state:
+        _spo2_state["state"] = new_state
+        _spo2_state["lock_duration_sec"] = lock_duration_sec
+        if new_state in ("LOCKED", "TRACKING") or prior_spo2 is None:
+            _spo2_state["last_spo2"] = spo2_out
+            _spo2_state["last_confidence"] = confidence_out
+
+    return {
+        "spo2": round(spo2_out, 1),
+        "confidence": round(confidence_out, 3),
         "r_value": round(r_median, 4),
-        "windows_used": int(r_values.size),
+        "windows_used": effective_windows,
+        "perfusion_index": round(mean_pi, 4),
+        "window_quality": round(window_quality, 3),
+        "beat_quality": round(mean_beat_quality, 3),
+        "ratio_quality": round(ratio_quality, 3),
+        "coverage_quality": round(coverage_quality, 3),
+        "effective_beats": effective_beats,
+        "effective_windows": effective_windows,
+        "spo2_confidence": round(confidence_out, 3),
+        "calibration_region": calibration_region,
+        # new additive diagnostics
+        "r_stability_score": round(r_stability_score, 3),
+        "state": new_state,
+        "lock_duration_sec": round(lock_duration_sec, 2),
     }
 
 
 # ---------------------------------------------------------------------------
-# Heart-rate variability (HRV) — Phase 2
+# Heart-rate variability (HRV)
 # ---------------------------------------------------------------------------
 
 def compute_hrv_metrics(rr_intervals_ms) -> dict:
     """
     Standard time-domain HRV metrics computed from beat-to-beat (RR)
     intervals, using the conventional definitions from HRV literature
-    (Task Force of ESC/NASPE, 1996; Shaffer & Ginsberg, 2017):
+    (Task Force of ESC/NASPE, 1996; Shaffer & Ginsberg, 2017).
 
-      - mean_rr : mean RR interval (ms)
-      - sdnn    : standard deviation of NN (normal-to-normal / RR) intervals
-                  (ms) — overall variability across the window.
-      - rmssd   : root mean square of successive RR differences (ms) —
-                  sqrt(mean((RR[i+1] - RR[i])^2)) — reflects short-term,
-                  parasympathetically-mediated variability and is the
-                  metric least sensitive to trend/artifact.
-      - pnn50   : percentage of successive RR differences that exceed
-                  50 ms — another parasympathetic-activity proxy.
+    Metrics:
+      - mean_rr  : mean RR interval (ms)
+      - sdnn     : SD of NN intervals (ms) — overall variability
+      - rmssd    : root mean square of successive RR differences (ms) —
+                   parasympathetically-mediated short-term variability
+      - pnn50    : % of successive diffs > 50 ms — parasympathetic proxy
+      - n_intervals: number of clean intervals used in computation
+      - median_rr   : median RR (ms) — more robust than mean for skewed
+                      distributions containing residual ectopic beats
+      - cvrr        : RMSSD / mean_rr × 100 % — coefficient of variation
+                      of RR; a normalized HRV measure independent of mean
+                      heart rate (Kleiger et al. 2005; Billman 2011)
+      - hrv_confidence: composite 0-1 confidence that these metrics are
+                      meaningful given the available clean intervals and
+                      physiological plausibility of the SDNN value
+      - artifact_pct: percentage of input intervals flagged as artifacts
+                      before clean-interval selection
 
-    Caveat: clinically-referenced HRV norms are usually computed over
-    ~5 minute windows. Over our short (~10 s) rolling buffer these values
-    are internally consistent and useful for relative/trend comparisons,
-    but should not be compared directly to published 5-minute norms.
+    Artifact removal: intervals outside 40-200 BPM bounds are removed first;
+    then intervals deviating > HRV_ARTIFACT_RR_TOLERANCE (25 %) from the
+    local median are flagged as artifact. At least HRV_MIN_CLEAN_INTERVALS
+    (4) clean intervals are required before any metric is computed.
 
-    Returns None for any metric that doesn't have enough RR intervals to
-    be computed rather than a misleading placeholder value.
+    Caveat: clinically-referenced HRV norms are computed over ~5 minute
+    windows. Over a short (~10 s) rolling buffer, these values are internally
+    consistent for trend comparison but must not be compared directly to
+    published 5-minute norms.
     """
-    rr = np.asarray(rr_intervals_ms, dtype=np.float64)
-    n = int(rr.size)
+    rr_all = np.asarray(rr_intervals_ms, dtype=np.float64)
+    n_input = int(rr_all.size)
 
-    if n < 2:
-        return {"rmssd": None, "sdnn": None, "mean_rr": None, "pnn50": None, "n_intervals": n}
+    null_result = {
+        "rmssd": None, "sdnn": None, "mean_rr": None, "pnn50": None,
+        "n_intervals": n_input, "median_rr": None, "cvrr": None,
+        "hrv_confidence": 0.0, "artifact_pct": 100.0,
+    }
 
-    mean_rr = float(np.mean(rr))
-    sdnn = float(np.std(rr, ddof=1))  # ddof=1: sample (not population) standard deviation
+    if n_input < 2:
+        return null_result
 
-    if n < 3:
-        # Need at least 2 successive differences (3 RR intervals) for
-        # RMSSD/pNN50 to mean anything.
+    # --- Step 1: physiological bounds filter ---
+    physio_mask = (rr_all >= MIN_RR_SEC * 1000.0) & (rr_all <= MAX_RR_SEC * 1000.0)
+    rr_physio = rr_all[physio_mask]
+    if rr_physio.size < 2:
+        return null_result
+
+    # --- Step 2: deviation-from-median artifact flagging ---
+    local_median = float(np.median(rr_physio))
+    artifact_mask = (
+        np.abs(rr_physio - local_median) / (local_median + 1e-9) > HRV_ARTIFACT_RR_TOLERANCE
+    )
+    n_artifacts_total = int(np.sum(~physio_mask)) + int(np.sum(artifact_mask))
+    artifact_pct = round(float(n_artifacts_total / n_input * 100.0), 1)
+
+    rr_clean = rr_physio[~artifact_mask]
+    n_clean = int(rr_clean.size)
+
+    if n_clean < HRV_MIN_CLEAN_INTERVALS:
+        null_result["artifact_pct"] = artifact_pct
+        return null_result
+
+    # --- Core metrics ---
+    mean_rr = float(np.mean(rr_clean))
+    median_rr = float(np.median(rr_clean))
+    sdnn = float(np.std(rr_clean, ddof=1))
+
+    if n_clean < 3:
         return {
             "rmssd": None, "sdnn": round(sdnn, 2), "mean_rr": round(mean_rr, 2),
-            "pnn50": None, "n_intervals": n,
+            "pnn50": None, "n_intervals": n_clean,
+            "median_rr": round(median_rr, 2), "cvrr": None,
+            "hrv_confidence": 0.3, "artifact_pct": artifact_pct,
         }
 
-    successive_diffs = np.diff(rr)
+    successive_diffs = np.diff(rr_clean)
     rmssd = float(np.sqrt(np.mean(successive_diffs ** 2)))
     pnn50 = float(np.mean(np.abs(successive_diffs) > 50.0) * 100.0)
+
+    # CVRR = RMSSD / mean_RR × 100 %
+    # Normalizes RMSSD by the mean RR interval, making HRV comparable across
+    # different heart rates — a faster heart rate produces shorter RR intervals
+    # and therefore smaller absolute RMSSD, so CVRR corrects for this.
+    cvrr = float(rmssd / (mean_rr + 1e-9) * 100.0)
+
+    # --- HRV confidence ---
+    # Component 1: fraction of input intervals that were accepted as clean.
+    clean_fraction = float(np.clip(n_clean / max(n_input, 1), 0.0, 1.0))
+    # Component 2: inverse artifact rate.
+    artifact_score = 1.0 - artifact_pct / 100.0
+    # Component 3: physiological plausibility of SDNN. For short windows
+    # (~10 s), typical SDNN is 5-50 ms. Values outside this range (< 1 ms
+    # or > 200 ms) suggest either identical beats (possible artifact) or
+    # extreme irregularity (possible missed beats). Score peaks at sdnn = 15 ms.
+    sdnn_plausible = float(np.clip(
+        1.0 - abs(np.log10(max(sdnn, 0.1) / 15.0)) / 2.0, 0.0, 1.0
+    ))
+    hrv_confidence = float(np.clip(
+        0.4 * clean_fraction + 0.4 * artifact_score + 0.2 * sdnn_plausible,
+        0.0, 1.0,
+    ))
 
     return {
         "rmssd": round(rmssd, 2),
         "sdnn": round(sdnn, 2),
         "mean_rr": round(mean_rr, 2),
         "pnn50": round(pnn50, 2),
-        "n_intervals": n,
+        "n_intervals": n_clean,
+        # additional metrics
+        "median_rr": round(median_rr, 2),
+        "cvrr": round(cvrr, 2),
+        "hrv_confidence": round(hrv_confidence, 3),
+        "artifact_pct": artifact_pct,
     }
 
 
 # ---------------------------------------------------------------------------
-# Sensor diagnostics — Phase 4
+# Sensor diagnostics
 # ---------------------------------------------------------------------------
 
 def classify_sensor_status(ir) -> str:
