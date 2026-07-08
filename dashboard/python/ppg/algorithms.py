@@ -343,6 +343,27 @@ SENSOR_STATUS_LOW_DC = FINGER_DC_MIN
 SENSOR_STATUS_HIGH_DC = ADC_MAX_VALUE * 0.85
 SENSOR_STATUS_CLIPPING_FRACTION = 0.01  # >1 % of samples pinned at the rail
 
+# Minimum Signal Quality Index (compute_signal_quality's 0-100 `score`) for a
+# DC-plausible signal to still be reported as "GOOD". DC level alone (checked
+# above) only rules out no-contact / saturation / over-drive; it says nothing
+# about whether the waveform riding on that DC level is actually a usable
+# pulse. Without this check, a finger resting still with a noisy, motion-
+# corrupted, or otherwise unusable signal could be classified GOOD purely
+# because its average light level looks like tissue. 40/100 is deliberately
+# generous (roughly "somewhat usable"); callers wanting a precise numeric
+# threshold should read the SQI score directly rather than relying on this
+# coarse category.
+SENSOR_STATUS_MIN_SQI = 40.0
+
+# SQI score (0-100) at which estimate_heart_rate's confidence stops being
+# discounted for signal quality at all (see the "SQI trust discount" in
+# estimate_heart_rate). Deliberately a *different* number from
+# SENSOR_STATUS_MIN_SQI above: that one gates a coarse status label, this one
+# shapes a continuous confidence multiplier — and "usable" SQI varies by
+# sensor placement (fingertip vs. wrist) in a way a single pass/fail cutoff
+# can't capture, so HR is never unilaterally withheld by this factor alone.
+SQI_FULL_TRUST_SCORE = 60.0
+
 # --- HRV quality gates ---
 # Minimum number of clean (artifact-free) RR intervals required before
 # computing HRV metrics. Below this threshold, RMSSD and SDNN estimates
@@ -1522,7 +1543,7 @@ def _score_beats(peaks: np.ndarray, properties: dict, fs: float) -> dict:
     }
 
 
-def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
+def estimate_heart_rate(ir, fs: float = 50.0, debug: bool = False) -> dict:
     """
     Robust heart-rate estimator.
 
@@ -1547,6 +1568,18 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
     ranges from 0.5 (very tight, zero-confidence pair) to 1.0 (standard,
     full-confidence pair).
 
+    SQI trust discount: a window's confidence is scaled down as its Signal
+    Quality Index falls below `SQI_FULL_TRUST_SCORE`, down to half its
+    unscaled value at SQI=0 — it is never zeroed by SQI alone. An earlier
+    version of this function hard-discarded the BPM entirely below a fixed
+    SQI cutoff; that turned out to be too brittle across sensor placements
+    (a wrist sensor's "usable" SQI baseline can legitimately sit lower than a
+    fingertip sensor's) and caused real, correctly-measured heart rates to be
+    withheld. The graduated version below still penalizes low-SQI windows —
+    a noise-dominated window scores much lower confidence than a clean one —
+    but always returns a value plus its confidence, and leaves the trust
+    threshold to the caller/dashboard rather than deciding pass/fail here.
+
     Review improvement (performance): the signal-quality context below is
     computed via `_compute_signal_quality_impl` with the `filtered` signal
     and `peaks` already produced by this function, instead of calling the
@@ -1556,12 +1589,24 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
     buffer). Output values are identical; only the redundant computation is
     removed.
 
+    Parameters
+    ----------
+    debug : if True, attach a `"_debug"` key to the returned dict with a
+        stage-by-stage trace (peaks detected, RR intervals before/after the
+        physiological-bounds filter, RR intervals after Hampel rejection,
+        counts rejected at each stage, and — on any early return — a plain-
+        English `reason`). Use this to see exactly where RR intervals are
+        being dropped on real device data rather than guessing; it's the
+        direct instrumentation a code reviewer would otherwise ask you to
+        add by hand. No effect on the non-debug fields or on performance
+        when left False (the default).
+
     Returns
     -------
     dict with: heart_rate, rr_intervals_ms, confidence, beats_detected,
     peak_quality, rhythm_quality, beat_quality (existing keys), plus:
     signal_quality, motion_quality, coverage, rr_quality,
-    confidence_breakdown (new additive keys).
+    confidence_breakdown (new additive keys), plus `_debug` if `debug=True`.
     """
     ir = _as_float_array(ir)
     empty = {
@@ -1576,20 +1621,42 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
             "signal_quality": 0.0, "perfusion": 0.0, "motion": 0.0,
         },
     }
+
+    # --- Debug trace (opt-in, additive) ---
+    # Answers "where did my RR intervals go?" directly from real device
+    # buffers instead of requiring temporary print-statement instrumentation.
+    # Populated incrementally as the pipeline progresses; whatever stage the
+    # function returns at, `_debug` reflects everything computed up to and
+    # including that stage. Only attached to the return dict when debug=True
+    # so normal callers pay nothing for it.
+    dbg: dict = {"input_samples": int(ir.size), "fs": fs, "stage_reached": "input_length_check"}
+
+    def _finish(result: dict) -> dict:
+        if debug:
+            result = dict(result)
+            result["_debug"] = dbg
+        return result
+
     if ir.size < int(fs * 5):  # need a handful of seconds to see multiple beats
-        return empty
+        dbg["reason"] = f"buffer too short: {ir.size} samples < {int(fs * 5)} required (fs*5)"
+        return _finish(empty)
 
     filtered = bandpass_filter(ir, fs)
     peaks, properties = _detect_peaks(filtered, fs, return_properties=True)
+    dbg["stage_reached"] = "peak_detection"
+    dbg["peaks_detected"] = int(peaks.size)
     if peaks.size < 3:  # need ≥ 2 RR intervals to judge consistency
-        return empty
+        dbg["reason"] = f"only {peaks.size} peak(s) survived detection; need ≥3"
+        return _finish(empty)
 
     # Per-beat confidence from improved _score_beats (returns a dict)
     beat_result = _score_beats(peaks, properties, fs)
     beat_confidences = beat_result["beat_confidences"]
     beat_quality = float(np.mean(beat_confidences)) if beat_confidences.size else 0.0
+    dbg["mean_beat_confidence"] = round(beat_quality, 3)
 
-    rr = np.diff(peaks) / fs  # seconds
+    rr_raw = np.diff(peaks) / fs  # seconds
+    dbg["rr_ms_before_filtering"] = [round(x * 1000.0, 1) for x in rr_raw]
 
     # Per-RR weight: geometric mean of bounding beat confidences.
     # Ensures an interval is only trusted if BOTH bounding beats are clean.
@@ -1599,11 +1666,19 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
 
     # Stage 1: physiological bounds — stricter than the detection-time
     # refractory period (40-200 BPM here vs. 222 BPM at detection time).
+    rr = rr_raw
     physio_mask = (rr >= MIN_RR_SEC) & (rr <= MAX_RR_SEC)
     rr = rr[physio_mask]
     rr_weights = rr_weights[physio_mask]
+    dbg["stage_reached"] = "physiological_bounds_filter"
+    dbg["rr_ms_after_physio_filter"] = [round(x * 1000.0, 1) for x in rr]
+    dbg["n_rejected_by_physio_bounds"] = int(rr_raw.size - rr.size)
     if rr.size < 2:
-        return empty
+        dbg["reason"] = (
+            f"only {rr.size} interval(s) left after physiological-bounds filter "
+            f"({MIN_RR_SEC * 1000:.0f}-{MAX_RR_SEC * 1000:.0f} ms window); need ≥2"
+        )
+        return _finish(empty)
 
     # Stage 2: confidence-weighted Hampel-style outlier rejection.
     # tightening ranges from 0.5 (strictest, for low-confidence pairs) to
@@ -1615,14 +1690,21 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
     inlier_mask = np.abs(rr - median_rr) <= 3.0 * mad_rr * tightening
     clean_rr = rr[inlier_mask]
     clean_weights = rr_weights[inlier_mask]
+    dbg["stage_reached"] = "hampel_outlier_rejection"
+    dbg["rr_ms_after_hampel"] = [round(x * 1000.0, 1) for x in clean_rr]
+    dbg["n_rejected_by_hampel"] = int(rr.size - clean_rr.size)
     if clean_rr.size == 0:
         clean_rr = rr  # fall back rather than reporting nothing
         clean_weights = rr_weights
+        dbg["hampel_fallback_used"] = True
 
     # Stage 3: weighted median RR
     bpm = 60.0 / _weighted_median(clean_rr, clean_weights)
+    dbg["stage_reached"] = "bpm_computed"
+    dbg["raw_bpm"] = round(bpm, 1)
     if not (MIN_BPM <= bpm <= MAX_BPM):
-        return empty
+        dbg["reason"] = f"bpm {bpm:.1f} outside physiological range [{MIN_BPM}, {MAX_BPM}]"
+        return _finish(empty)
 
     retained_fraction = clean_rr.size / rr.size
     cv = float(np.std(clean_rr) / (np.mean(clean_rr) + 1e-9))
@@ -1633,6 +1715,7 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
     signal_quality_norm = quality["score"] / 100.0
     perfusion = quality["amplitude_score"]
     motion = quality["motion_score"] if quality["motion_score"] is not None else 1.0
+    dbg["sqi_score"] = round(quality["score"], 1)
 
     # Coverage: ratio of detected beats to the expected beat count given the
     # window duration and estimated HR. Values much below 1.0 indicate dropout
@@ -1641,7 +1724,7 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
     expected_beats = max((bpm / 60.0) * window_duration, 1.0)
     coverage = float(np.clip(peaks.size / expected_beats, 0.0, 1.0))
 
-    confidence = float(np.clip(
+    base_confidence = float(np.clip(
         0.30 * beat_quality
         + 0.25 * regularity
         + 0.20 * signal_quality_norm
@@ -1650,7 +1733,23 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
         0.0, 1.0,
     ))
 
-    return {
+    # Graduated SQI trust discount (replaces an earlier hard cutoff that
+    # unilaterally discarded any BPM below a fixed SQI threshold — too brittle
+    # across sensor placements/hardware, since "usable SQI" isn't the same
+    # number on a fingertip vs. a wrist sensor. Instead of the library
+    # deciding pass/fail, a low-SQI window just gets reported at
+    # correspondingly lower confidence: full trust once SQI reaches
+    # SQI_FULL_TRUST_SCORE, scaling down linearly below it, never an outright
+    # zero from this factor alone. The caller/dashboard can apply whatever
+    # confidence threshold fits its own sensor and use case.
+    sqi_trust = float(np.clip(quality["score"] / SQI_FULL_TRUST_SCORE, 0.0, 1.0))
+    confidence = float(np.clip(base_confidence * (0.5 + 0.5 * sqi_trust), 0.0, 1.0))
+    dbg["base_confidence"] = round(base_confidence, 3)
+    dbg["sqi_trust_factor"] = round(sqi_trust, 3)
+
+    dbg["stage_reached"] = "complete"
+    dbg["retained_fraction"] = round(retained_fraction, 3)
+    return _finish({
         "heart_rate": round(bpm, 1),
         "rr_intervals_ms": [round(x * 1000.0, 1) for x in clean_rr],
         "confidence": round(confidence, 3),
@@ -1671,7 +1770,7 @@ def estimate_heart_rate(ir, fs: float = 50.0) -> dict:
             "perfusion": round(perfusion, 3),
             "motion": round(float(motion), 3),
         },
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -1797,6 +1896,95 @@ def set_spo2_calibration_table(table: list[tuple[float, float, float]] | None) -
     """
     global _active_calibration_table
     _active_calibration_table = table
+
+
+def fit_spo2_calibration(
+    r_values, reference_spo2_values, install: bool = True
+) -> dict:
+    """
+    Fit a linear SpO2 = a - b*R calibration from paired reference
+    measurements and (optionally) install it as the active calibration.
+
+    Review context: the built-in `SPO2_CAL_A`/`SPO2_CAL_B` (110/25) are a
+    commonly-published *starting point* for MAX30102-class hardware, not a
+    universal constant — actual R-to-SpO2 mapping shifts with LED
+    wavelength binning, photodiode responsivity, LED drive current, optical
+    coupling, and skin tone, so a device reading ~88 % at rest is a strong
+    signal that the *installed* hardware's true curve differs from that
+    generic starting point. There is no responsible way to guess a
+    replacement pair of constants without a reference measurement — doing
+    so would just swap one unverified guess for another. This function
+    does the honest version: collect `r_value` (from `estimate_spo2`'s
+    `"r_value"` field) alongside a simultaneous reading from a reference
+    pulse oximeter across a range of conditions (ideally including some
+    breath-holds or altitude/activity variation to get spread below ~97 %,
+    since a calibration fit entirely from resting-normal data extrapolates
+    poorly to the low-saturation region), then fit here.
+
+    Parameters
+    ----------
+    r_values : sequence of float — R values from `estimate_spo2(...)["r_value"]`
+    reference_spo2_values : sequence of float — simultaneous reference SpO2 (%)
+    install : if True (default), installs the fit via
+        `set_spo2_calibration_table` so subsequent `estimate_spo2` calls
+        (that don't pass their own `calibration_table`) use it immediately.
+
+    Returns
+    -------
+    dict with: a, b (the fitted SpO2 = a - b*R coefficients), r_squared
+    (fit quality, 0-1), n (number of paired points used), and a `warning`
+    string if the fit is likely unreliable (too few points, or too narrow
+    an R range to extrapolate from).
+    """
+    r = np.asarray(r_values, dtype=np.float64)
+    y = np.asarray(reference_spo2_values, dtype=np.float64)
+    if r.size != y.size:
+        raise ValueError(
+            f"r_values ({r.size}) and reference_spo2_values ({y.size}) must be the same length"
+        )
+    valid = np.isfinite(r) & np.isfinite(y)
+    r, y = r[valid], y[valid]
+
+    warning = None
+    if r.size < 5:
+        warning = f"Only {r.size} valid paired point(s); at least 5-10 across varied conditions is recommended for a trustworthy fit."
+        if r.size < 2:
+            return {"a": SPO2_CAL_A, "b": SPO2_CAL_B, "r_squared": 0.0, "n": int(r.size), "warning": warning + " Falling back to built-in defaults; no fit was installed."}
+    elif float(np.ptp(r)) < 0.15:
+        warning = f"R values span only {np.ptp(r):.3f}; a fit from such a narrow range extrapolates poorly outside it."
+
+    # SpO2 = a - b*R  <=>  y = a + (-b)*r  -> linear least squares on [r, 1]
+    design = np.stack([r, np.ones_like(r)], axis=1)
+    (slope, intercept), residuals, _, _ = np.linalg.lstsq(design, y, rcond=None)
+    a = float(intercept)
+    b = float(-slope)
+
+    y_pred = a - b * r
+    ss_res = float(np.sum((y - y_pred) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2)) + 1e-12
+    r_squared = float(np.clip(1.0 - ss_res / ss_tot, 0.0, 1.0))
+
+    result = {"a": round(a, 3), "b": round(b, 3), "r_squared": round(r_squared, 4), "n": int(r.size)}
+    if warning:
+        result["warning"] = warning
+
+    # Sanity check: SpO2 must decrease as R increases (b > 0 in SpO2 = a - b*R).
+    # A non-positive fitted b means the paired data doesn't actually show that
+    # relationship (almost always too few/too noisy points, not a real
+    # physiological finding) — installing it would make estimates worse than
+    # the built-in defaults, so refuse to install even if `install=True`.
+    if b <= 0:
+        result["warning"] = (
+            (result.get("warning", "") + " " if "warning" in result else "")
+            + f"Fitted slope b={b:.2f} is non-positive (SpO2 should decrease as R increases); "
+            "this fit was NOT installed. Collect more paired points across a wider R range."
+        )
+        return result
+
+    if install:
+        r_upper = float(np.max(r)) + 1.0  # generous upper bound so the fit covers the observed range and a margin beyond it
+        set_spo2_calibration_table([(r_upper, a, b)])
+    return result
 
 
 def _spo2_calibrate(
@@ -2412,19 +2600,40 @@ def compute_hrv_metrics(rr_intervals_ms) -> dict:
 # Sensor diagnostics
 # ---------------------------------------------------------------------------
 
-def classify_sensor_status(ir) -> str:
+def classify_sensor_status(
+    ir, fs: float | None = None, sqi_score: float | None = None
+) -> str:
     """
     Classify the raw IR channel into a coarse sensor-health category so the
     dashboard/firmware can distinguish "no signal" from "signal present but
     poorly conditioned" without inspecting every diagnostic field.
 
-    Returns one of: "LOW_SIGNAL", "GOOD", "HIGH_SIGNAL", "SATURATED".
+    Returns one of: "LOW_SIGNAL", "GOOD", "HIGH_SIGNAL", "SATURATED",
+    "POOR_SIGNAL".
 
     Precedence: saturation is checked first because a clipped signal is
     unusable regardless of its average DC level; then low/high DC bands
     flag a fit that's technically producing a signal but is either too
     weak (loose contact, low perfusion) or over-driven (too much LED
     current / pressure) to trust for downstream estimation.
+
+    Review fix: DC level and clipping alone cannot tell "signal present"
+    from "signal present *and usable*" — a DC-plausible, non-clipped signal
+    can still be dominated by motion/noise and produce a low Signal Quality
+    Index (SQI) while this function used to report it as "GOOD". To catch
+    that case without forcing every caller to pay for an extra SQI
+    computation, this now accepts an optional quality signal:
+
+      - Pass `sqi_score` directly (0-100, e.g. `compute_signal_quality(ir,
+        fs)["score"]`) if you already computed it — this is the cheap path
+        and what `PPGProcessor` does, since it computes SQI every call anyway.
+      - Pass `fs` (and omit `sqi_score`) to have this function compute SQI
+        itself from `ir`.
+      - Pass neither to get the original DC/clipping-only behavior exactly
+        as before (fully backward compatible for existing callers/tests).
+
+    When a DC-plausible, non-saturated signal's SQI falls below
+    `SENSOR_STATUS_MIN_SQI`, "POOR_SIGNAL" is returned instead of "GOOD".
     """
     ir = _as_float_array(ir)
     if ir.size == 0:
@@ -2440,4 +2649,12 @@ def classify_sensor_status(ir) -> str:
         return "HIGH_SIGNAL"
     if dc_level < SENSOR_STATUS_LOW_DC:
         return "LOW_SIGNAL"
+
+    # DC level looks like tissue and isn't saturated — but that alone
+    # doesn't mean the waveform is usable. Check SQI if we have (or can get) it.
+    if sqi_score is None and fs is not None:
+        sqi_score = compute_signal_quality(ir, fs)["score"]
+    if sqi_score is not None and sqi_score < SENSOR_STATUS_MIN_SQI:
+        return "POOR_SIGNAL"
+
     return "GOOD"

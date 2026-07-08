@@ -174,7 +174,13 @@ class PPGProcessor:
         self._latest_valid_spo2 = None
         self._published_spo2 = None
 
-    def process(self, ir: int | None, red: int | None, motion_state: str | None = None) -> dict:
+    def process(
+        self,
+        ir: int | None,
+        red: int | None,
+        motion_state: str | None = None,
+        debug: bool = False,
+    ) -> dict:
         """
         Feed one new IR/RED sample pair and return the current processed
         reading computed over the trailing rolling window.
@@ -190,6 +196,14 @@ class PPGProcessor:
             reproduces the previous behaviour. HR confidence is scaled by
             `MOTION_CONFIDENCE_MULTIPLIERS`; unrecognized/missing states
             get a 1.0 (no-op) multiplier.
+        debug : if True, forwards to `estimate_heart_rate(..., debug=True)`
+            and attaches its stage-by-stage trace as `hr_debug` in the
+            returned dict (peaks detected, RR intervals before/after each
+            filtering stage, SQI, and — if HR came back None — a plain-
+            English reason why). Use this to diagnose "heart_rate is always
+            None" or "HRV is always None" directly against real recorded
+            IR/RED buffers instead of guessing. `None` (not present) when
+            `debug=False` (the default) or while no finger is detected.
 
         Returns
         -------
@@ -209,12 +223,13 @@ class PPGProcessor:
             "hr_quality": dict,             # {peak_quality, rhythm_quality, motion_quality,
                                              #  signal_quality, overall_confidence, confidence}
             "hrv": dict,                    # {rmssd, sdnn, mean_rr, pnn50, n_intervals}
-            "sensor_status": str,           # NO_FINGER | LOW_SIGNAL | GOOD | HIGH_SIGNAL | SATURATED
+            "sensor_status": str,           # NO_FINGER | LOW_SIGNAL | POOR_SIGNAL | GOOD | HIGH_SIGNAL | SATURATED
             "timestamp": float,             # time.time() at the moment this reading was produced
             "monotonic_timestamp": float,   # time.monotonic() at the same moment; never jumps,
                                              #  unaffected by system clock changes — use this for
                                              #  sensor-to-sensor sync / elapsed-time math
             "motion_state": str | None,     # echoes the motion_state argument, for logging/replay
+            "hr_debug": dict | None,        # present only when debug=True and a finger is detected
         }
         All fields present in earlier revisions are unchanged in name and
         meaning; `timestamp`, `monotonic_timestamp`, and `motion_state` are
@@ -234,7 +249,12 @@ class PPGProcessor:
 
         raw_finger = assess_finger_presence(ir_arr, self.fs)
         quality = compute_signal_quality(ir_arr, self.fs)
-        sensor_status = classify_sensor_status(ir_arr)
+        # Review fix: pass the SQI we already computed above so a DC-plausible
+        # but noisy/motion-corrupted signal is reported as "POOR_SIGNAL"
+        # rather than the old DC-only "GOOD" (which previously contradicted
+        # a low `quality["score"]` shown right next to it on the dashboard).
+        # No extra computation cost — `quality` is already available.
+        sensor_status = classify_sensor_status(ir_arr, sqi_score=quality["score"])
 
         # --- Finger-presence hysteresis ---
         # Track how many *consecutive* samples agree with the raw per-
@@ -288,10 +308,13 @@ class PPGProcessor:
             "signal_quality": 0.0, "overall_confidence": 0.0, "confidence": 0.0,
         }
         hrv = {"rmssd": None, "sdnn": None, "mean_rr": None, "pnn50": None, "n_intervals": 0}
+        hr_debug: dict | None = None
 
         if finger_detected:
             # --- Heart rate: raw per-window estimate -> EMA smoothing ---
-            hr_result = estimate_heart_rate(ir_arr, self.fs)
+            hr_result = estimate_heart_rate(ir_arr, self.fs, debug=debug)
+            if debug:
+                hr_debug = hr_result.get("_debug")
             raw_heart_rate = hr_result["heart_rate"]
             rr_intervals_ms = hr_result["rr_intervals_ms"]
             hr_estimator_confidence = hr_result["confidence"]
@@ -411,4 +434,5 @@ class PPGProcessor:
             "timestamp": time.time(),
             "monotonic_timestamp": now_monotonic,
             "motion_state": motion_state,
+            "hr_debug": hr_debug,
         }
