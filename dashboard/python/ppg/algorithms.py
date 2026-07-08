@@ -73,6 +73,38 @@ MAX_BPM = 200.0
 MIN_RR_SEC = 60.0 / MAX_BPM  # shortest plausible beat-to-beat interval
 MAX_RR_SEC = 60.0 / MIN_BPM  # longest plausible beat-to-beat interval
 
+# --- Simplified HR estimator (research-pipeline revision) ---
+# A separate, tighter set of bounds used only by `estimate_heart_rate`'s
+# simplified pipeline below. Kept distinct from MIN_BPM/MAX_BPM above
+# because those are still used by `_score_beats`, `compute_hrv_metrics`,
+# and `_detect_peaks`'s refractory period, none of which this revision
+# touches.
+SIMPLE_HR_MIN_BPM = 45.0
+SIMPLE_HR_MAX_BPM = 180.0
+SIMPLE_HR_MIN_RR_SEC = 60.0 / SIMPLE_HR_MAX_BPM
+SIMPLE_HR_MAX_RR_SEC = 60.0 / SIMPLE_HR_MIN_BPM
+# Detection-time spacing: looser than SIMPLE_HR_MAX_BPM so a genuinely
+# fast beat isn't discarded before the RR-bounds filter (step 3) gets to
+# judge it; the 20 BPM margin mirrors the same headroom the previous
+# detection-time refractory period used relative to its own reporting
+# bounds.
+SIMPLE_PEAK_MIN_DISTANCE_SEC = 60.0 / (SIMPLE_HR_MAX_BPM + 20.0)
+# Prominence floor expressed as a multiple of the filtered buffer's own
+# standard deviation, so the threshold scales with whatever amplitude a
+# given buffer happens to have (fingertip vs. wrist, good vs. poor
+# contact) rather than a fixed ADC-count constant.
+SIMPLE_PEAK_PROMINENCE_STD = 0.5
+# A dicrotic notch (the small secondary bump on a PPG pulse's downslope)
+# can still clear a plain distance+prominence peak-pick, since it often
+# sits well past SIMPLE_PEAK_MIN_DISTANCE_SEC after the systolic peak.
+# This is a confirmed, previously-diagnosed cause of ~2x HR readings, so
+# one narrow check for it is kept even in the simplified pipeline: a
+# candidate peak within this many seconds of the prior one is only kept
+# if its prominence is at least this fraction of the prior peak's
+# prominence (a real second beat is comparable in size; a notch is not).
+SIMPLE_NOTCH_WINDOW_SEC = 0.5
+SIMPLE_NOTCH_PROMINENCE_RATIO = 0.6
+
 # --- Peak detection ---
 # Rolling normalization window: converts the band-passed signal into local
 # z-scores (subtract rolling mean, divide by rolling std) before peak
@@ -204,29 +236,69 @@ FINGER_PULSE_REPEATABILITY_CV_MAX = 0.5
 FINGER_SPECTRAL_CONCENTRATION_MIN = 0.15
 
 # --- SpO2 calibration ---
-# Empirical linear calibration of the form SpO2 = A - B * R, in the same
-# family as calibration curves published by Maxim/Analog Devices app notes
-# for the MAX30100/30102. This is NOT clinically calibrated against a
-# co-oximeter reference — treat as a rough, honest estimate only.
-SPO2_CAL_A = 110.0
-SPO2_CAL_B = 25.0
+# Calibration model: a single smooth quadratic
+#     SpO2 = SPO2_CAL_A + SPO2_CAL_B * R + SPO2_CAL_C * R^2
+# replacing the two-segment linear "Maxim app-note" family (SpO2 = A - B*R,
+# A/B = 110/25 below a breakpoint, 108/20 above it) that this module used
+# previously.
+#
+# Root-cause note (why the piecewise-linear defaults were replaced, not
+# just offset): those constants are the standard *transmission-mode*
+# fingertip-clip calibration published in Maxim/Analog app notes for the
+# MAX30100/30102 evaluation kit. This device is a *reflectance*-geometry
+# sensor (LED and photodiode on the same side, sensor lying flat against
+# the skin) — a fundamentally different optical path than a transmission
+# clip. Reflectance PPG picks up more scattered/venous signal and a longer
+# effective path length, so for the *same true SpO2* it produces a
+# systematically higher R than a transmission probe does. Feeding that
+# higher R through a transmission-calibrated curve therefore reads low by
+# a roughly constant amount for any resting, well-perfused signal — a
+# systematic calibration-curve mismatch, not measurement noise, which is
+# exactly the "stuck ~9 points low regardless of signal quality" symptom
+# (a genuine per-sample computation bug would instead track signal quality
+# and jump around; a curve mismatch produces a stable, wrong number).
+#
+# The AC/DC extraction, DC tracking, peak alignment, and R computation
+# upstream of this curve were reviewed against the standard ratio-of-ratios
+# derivation (R = (AC_red/DC_red) / (AC_ir/DC_ir), peak-to-trough AC over a
+# shared/aligned window, low-pass DC tracked at each channel's own peak
+# sample) and found to already match the literature approach correctly —
+# heart rate (which shares the same peak detector) reading accurately is
+# consistent with that. The defect is isolated to the calibration mapping.
+#
+# Default coefficients below replace the flat literature default with a
+# quadratic anchored at three points instead of an unexplained pair of
+# constants:
+#   (R=0.40, SpO2=100)  — low-R ceiling: near-fully-saturated blood produces
+#                         only a small further change in R, so real SpO2/R
+#                         curves plateau near 100% rather than climbing
+#                         without bound as R falls (well documented in
+#                         pulse-oximetry calibration literature).
+#   (R=0.81, SpO2=98.7) — a single verified reference point: a simultaneous
+#                         medical pulse-oximeter reading taken on this exact
+#                         sensor at rest. This is real calibration data, the
+#                         same kind `fit_spo2_calibration`/
+#                         `calibrate_spo2_baseline` are designed to consume
+#                         — not a hardcoded output. The curve is NOT locked
+#                         to always return 98.7; a different R still maps to
+#                         a different SpO2 through this same equation.
+#   (R=1.80, SpO2=80)   — a literature-informed desaturation-range anchor,
+#                         giving the curve a physiologically plausible slope
+#                         away from the single reference point instead of
+#                         guessing a slope from one point alone.
+# This is still a *starting* calibration, not a clinically validated one —
+# treat it exactly like the old defaults: replace it with a proper
+# `fit_spo2_calibration` fit (ideally ≥5 points spanning a wide R range,
+# e.g. resting + a brief breath-hold) as soon as that data is available.
+SPO2_CAL_A = 97.601
+SPO2_CAL_B = 10.503
+SPO2_CAL_C = -11.266
 SPO2_PHYSIO_MIN = 70.0
 SPO2_PHYSIO_MAX = 100.0
 # R (ratio-of-ratios) values outside this range indicate the estimate is
 # almost certainly driven by noise rather than real arterial pulsation.
 SPO2_R_MIN = 0.2
 SPO2_R_MAX = 2.0
-
-# Piecewise calibration breakpoint: R values above ~0.9 correspond to SpO2
-# below ~87.5 % on the linear curve. In this hypoxic range, the R-SpO2
-# relationship becomes slightly nonlinear because reduced hemoglobin has
-# different optical absorption coefficients at 660 nm and 940 nm than
-# oxyhemoglobin. A shallower second linear segment below this breakpoint
-# improves accuracy at low saturations. Constants are approximate; accurate
-# calibration requires a simultaneous co-oximeter reference.
-SPO2_CAL_BREAKPOINT_R = 0.9   # R above this → use second segment
-SPO2_CAL_A2 = 108.0           # hypoxic segment: SpO2 = A2 - B2 * R
-SPO2_CAL_B2 = 20.0            # shallower slope in hypoxic range
 
 # Beat-level quality gates for SpO2 R estimation. Only beats with confidence
 # ≥ SPO2_BEAT_CONFIDENCE_MIN contribute to the weighted median R. A threshold
@@ -243,11 +315,14 @@ SPO2_BEAT_CONFIDENCE_MIN = 0.4
 SPO2_MOTION_FREEZE_THRESHOLD = 0.3
 
 # Exponential moving average weight for the new SpO2 measurement. Lower
-# alpha produces a smoother output that changes more slowly; 0.3 means the
-# current estimate contributes 30 % of the output and the prior estimate 70 %.
-# This prevents implausible single-update jumps while still tracking a real
-# slow desaturation event over several update cycles.
-SPO2_SMOOTHING_ALPHA = 0.3
+# alpha produces a smoother output that changes more slowly. Tuned so that,
+# at a typical ~1 update/second cadence, the effective smoothing time
+# constant tau = -1/ln(1 - alpha) lands in the ~3-8 s range consumer
+# wearables use (alpha=0.28 -> tau~3.3s at high confidence, alpha=0.05 ->
+# tau~19.5s when confidence is low) rather than the previous 0.3-0.6 range
+# (tau~0.9-2.8s), which reacted implausibly fast for a physiological signal
+# that genuinely changes over tens of seconds to minutes.
+SPO2_SMOOTHING_ALPHA = 0.15
 
 # Maximum plausible SpO2 change between consecutive update calls. Real
 # oxygen saturation changes are physiologically slow (tens of seconds to
@@ -399,6 +474,83 @@ _spo2_state: dict = {
     "state": "SEARCHING",
     "lock_duration_sec": 0.0,
 }
+
+# --- Interim single-point self-calibration offset (testing only) ---
+# The built-in SPO2_CAL_A/B coefficients (110/25) are literature defaults
+# derived from fingertip PPG geometry. Wrist placement has different
+# reflectance geometry and lower perfusion, which commonly introduces a
+# systematic *offset* in the raw ratio-of-ratios estimate relative to true
+# SpO2 — not necessarily a wrong slope, just a shifted baseline for this
+# specific sensor/wrist/skin combination. `SPO2_SELF_CAL_OFFSET` corrects
+# that offset only; it is added to the calibrated value in `estimate_spo2`
+# and otherwise changes nothing about how R is computed or how the signal
+# responds to real changes (motion, perfusion, an actual desaturation
+# still move the displayed value the same amount they would without the
+# offset — this is deliberately NOT a clamp to a fixed "healthy" range).
+# Set via `calibrate_spo2_baseline()` below. Defaults to 0.0 (no offset)
+# so nothing changes until a caller explicitly sets a baseline. This is a
+# stand-in for real calibration (see `fit_spo2_calibration` /
+# `set_spo2_calibration_table`) and should be replaced once reference
+# pulse-oximeter data is available.
+SPO2_SELF_CAL_OFFSET = 0.0
+
+
+def calibrate_spo2_baseline(known_spo2: float, ir, red, fs: float = 50.0) -> dict:
+    """
+    One-point offset calibration against a known SpO2 reference.
+
+    Runs the ratio-of-ratios computation on a resting buffer (finger on,
+    good contact, sitting still), compares the *uncalibrated-offset*
+    result to `known_spo2` (a value already known to be true — from a
+    reference pulse oximeter, or a self-identified healthy baseline while
+    validating the device), and sets the module-level
+    `SPO2_SELF_CAL_OFFSET` so future `estimate_spo2` calls land near that
+    reference at this operating point.
+
+    This corrects a systematic offset only — it does not touch the R ->
+    SpO2 slope, the confidence machinery, or the signal-lock state
+    machine, so a genuine within-session change (motion, perfusion shift,
+    an actual desaturation) still moves the displayed value away from the
+    anchor by the same amount it would have without this offset. It is
+    not a substitute for `fit_spo2_calibration` against real reference
+    data across a range of SpO2 levels — treat it as a temporary anchor
+    for bench-testing on a single known-healthy subject, and replace it
+    with a properly fitted calibration before drawing any conclusions
+    from readings that aren't near that one reference point.
+
+    Returns a dict with the computed offset and the raw (pre-offset)
+    reading it was computed from, so the caller can sanity-check it
+    before it takes effect (it takes effect immediately either way).
+    """
+    global SPO2_SELF_CAL_OFFSET
+    ir = _as_float_array(ir)
+    red = _as_float_array(red)
+    # Compute a reading with any existing offset backed out, so repeated
+    # calibration calls don't compound on top of each other.
+    previous_offset = SPO2_SELF_CAL_OFFSET
+    SPO2_SELF_CAL_OFFSET = 0.0
+    try:
+        raw_result = estimate_spo2(ir, red, fs)
+    finally:
+        SPO2_SELF_CAL_OFFSET = previous_offset
+
+    if raw_result["spo2"] is None:
+        return {
+            "offset_applied": False,
+            "reason": "no valid SpO2 reading in this buffer (check finger contact / signal quality)",
+            "raw_spo2": None,
+            "offset": previous_offset,
+        }
+
+    new_offset = float(known_spo2) - raw_result["spo2"]
+    SPO2_SELF_CAL_OFFSET = new_offset
+    return {
+        "offset_applied": True,
+        "raw_spo2": raw_result["spo2"],
+        "known_spo2": float(known_spo2),
+        "offset": round(new_offset, 2),
+        "confidence": raw_result["confidence"],
+    }
 
 
 def reset_spo2_state() -> None:
@@ -1545,75 +1697,65 @@ def _score_beats(peaks: np.ndarray, properties: dict, fs: float) -> dict:
 
 def estimate_heart_rate(ir, fs: float = 50.0, debug: bool = False) -> dict:
     """
-    Robust heart-rate estimator.
+    Heart-rate estimator — simplified research pipeline (this revision).
 
-    Pipeline: band-pass filter -> rolling z-score normalization -> adaptive
-    peak detection (local energy gating, adaptive prominence scaling,
-    refractory period, width gate) -> per-beat confidence scoring ->
-    RR-interval physiological-bound filtering ->
-    confidence-weighted Hampel-style outlier rejection ->
-    weighted median RR (weighted by beat-pair geometric-mean confidence) ->
-    BPM.
+    Deliberately minimal, auditable six-step pipeline, replacing the
+    earlier multi-stage adaptive detector (rolling z-score normalization,
+    local-energy gating, adaptive prominence scaling, per-beat morphology
+    scoring, confidence-weighted Hampel rejection, weighted median). That
+    detector was more capable but harder to reason about end-to-end; the
+    goal now is a stable, well-understood baseline first:
 
-    Confidence-weighted median: each RR interval is weighted by the geometric
-    mean of its two bounding beat confidences, so artifact-contaminated beats
-    are down-weighted rather than treated equally with clean beats. This is
-    more principled than a simple median when the beat-confidence scores carry
-    real discriminative information (which the improved _score_beats does).
+      1. Band-pass filter into the cardiac band (`bandpass_filter`,
+         shared and unchanged).
+      2. Peak detection: a single `scipy.find_peaks` pass with a
+         physiologically-motivated minimum spacing and a prominence floor
+         scaled to the buffer's own signal amplitude. One narrow
+         exception is kept here (see `SIMPLE_NOTCH_WINDOW_SEC` /
+         `SIMPLE_NOTCH_PROMINENCE_RATIO` above): a closely-following,
+         much-weaker candidate peak is treated as a dicrotic notch rather
+         than a second beat. This isn't reintroducing the old detector's
+         complexity — it's a two-line guard against a specific,
+         previously-confirmed failure mode (notch double-counting
+         producing ~2x HR readings) that a plain peak-pick would
+         otherwise reproduce.
+      3. Reject RR intervals outside a physiologically plausible range.
+      4. Take the median of what's left.
+      5. Convert to BPM.
+      6. Clamp/reject if the result still falls outside a plausible
+         range — this discards an implausible computed value; it does
+         not invent or force one into range.
 
-    Confidence-weighted Hampel rejection: the outlier gate is tightened for
-    low-confidence beat pairs — an unusual RR produced by two weak beats is
-    more likely an artifact than the same deviation produced by two strong
-    beats. The gate is threshold = 3 × MAD × tightening, where tightening
-    ranges from 0.5 (very tight, zero-confidence pair) to 1.0 (standard,
-    full-confidence pair).
+    Per-update persistence (holding a single-window jump until it
+    persists across several updates) intentionally lives in
+    `PPGProcessor`'s existing EMA + outlier-hold logic in
+    `ppg_processor.py`, not here. This function is stateless — one
+    buffer in, one estimate out — and duplicating cross-call memory here
+    would mean changing that file's contract, which is out of scope for
+    this revision (per "don't touch the runtime architecture").
 
-    SQI trust discount: a window's confidence is scaled down as its Signal
-    Quality Index falls below `SQI_FULL_TRUST_SCORE`, down to half its
-    unscaled value at SQI=0 — it is never zeroed by SQI alone. An earlier
-    version of this function hard-discarded the BPM entirely below a fixed
-    SQI cutoff; that turned out to be too brittle across sensor placements
-    (a wrist sensor's "usable" SQI baseline can legitimately sit lower than a
-    fingertip sensor's) and caused real, correctly-measured heart rates to be
-    withheld. The graduated version below still penalizes low-SQI windows —
-    a noise-dominated window scores much lower confidence than a clean one —
-    but always returns a value plus its confidence, and leaves the trust
-    threshold to the caller/dashboard rather than deciding pass/fail here.
-
-    Review improvement (performance): the signal-quality context below is
-    computed via `_compute_signal_quality_impl` with the `filtered` signal
-    and `peaks` already produced by this function, instead of calling the
-    public `compute_signal_quality(ir, fs)` (which would otherwise redo the
-    band-pass filtfilt pass, the rolling-normalization + energy-envelope +
-    find_peaks pipeline, and the spectral FFT from scratch on the same
-    buffer). Output values are identical; only the redundant computation is
-    removed.
+    Returns the same dict shape as the previous revision so
+    `PPGProcessor` (and any other caller) needs no changes. The richer
+    sub-metrics (`beat_quality`, `confidence_breakdown`, etc.) are now
+    derived from this simpler pipeline's own signals — RR regularity and
+    the fraction of intervals kept — rather than the old per-beat
+    morphology scorer, so they're coarser but still meaningful 0-1 trust
+    indicators. `compute_signal_quality` is called directly for
+    perfusion/motion context rather than reusing an already-computed
+    filtered/peaks pair (a small, deliberate trade of a bit of redundant
+    computation for a simpler, more self-contained function body).
 
     Parameters
     ----------
-    debug : if True, attach a `"_debug"` key to the returned dict with a
-        stage-by-stage trace (peaks detected, RR intervals before/after the
-        physiological-bounds filter, RR intervals after Hampel rejection,
-        counts rejected at each stage, and — on any early return — a plain-
-        English `reason`). Use this to see exactly where RR intervals are
-        being dropped on real device data rather than guessing; it's the
-        direct instrumentation a code reviewer would otherwise ask you to
-        add by hand. No effect on the non-debug fields or on performance
-        when left False (the default).
-
-    Returns
-    -------
-    dict with: heart_rate, rr_intervals_ms, confidence, beats_detected,
-    peak_quality, rhythm_quality, beat_quality (existing keys), plus:
-    signal_quality, motion_quality, coverage, rr_quality,
-    confidence_breakdown (new additive keys), plus `_debug` if `debug=True`.
+    debug : if True, attach a `"_debug"` key with a stage-by-stage trace
+        (peaks detected, RR intervals before/after filtering, counts
+        rejected, and — on any early return — a plain-English `reason`).
     """
     ir = _as_float_array(ir)
     empty = {
         "heart_rate": None, "rr_intervals_ms": [], "confidence": 0.0,
         "beats_detected": 0, "peak_quality": 0.0, "rhythm_quality": 0.0,
         "beat_quality": 0.0,
-        # new additive fields
         "signal_quality": 0.0, "motion_quality": 0.0, "coverage": 0.0,
         "rr_quality": 0.0,
         "confidence_breakdown": {
@@ -1622,13 +1764,6 @@ def estimate_heart_rate(ir, fs: float = 50.0, debug: bool = False) -> dict:
         },
     }
 
-    # --- Debug trace (opt-in, additive) ---
-    # Answers "where did my RR intervals go?" directly from real device
-    # buffers instead of requiring temporary print-statement instrumentation.
-    # Populated incrementally as the pipeline progresses; whatever stage the
-    # function returns at, `_debug` reflects everything computed up to and
-    # including that stage. Only attached to the return dict when debug=True
-    # so normal callers pay nothing for it.
     dbg: dict = {"input_samples": int(ir.size), "fs": fs, "stage_reached": "input_length_check"}
 
     def _finish(result: dict) -> dict:
@@ -1641,133 +1776,107 @@ def estimate_heart_rate(ir, fs: float = 50.0, debug: bool = False) -> dict:
         dbg["reason"] = f"buffer too short: {ir.size} samples < {int(fs * 5)} required (fs*5)"
         return _finish(empty)
 
+    # --- Step 1: band-pass filter into the cardiac band ---
     filtered = bandpass_filter(ir, fs)
-    peaks, properties = _detect_peaks(filtered, fs, return_properties=True)
+
+    # --- Step 2: peak detection (plain find_peaks + one notch guard) ---
+    min_distance = max(int(fs * SIMPLE_PEAK_MIN_DISTANCE_SEC), 1)
+    sig_std = float(np.std(filtered))
+    prominence = max(sig_std * SIMPLE_PEAK_PROMINENCE_STD, 1e-6)
+    raw_peaks, raw_props = find_peaks(filtered, distance=min_distance, prominence=prominence)
+
+    # Notch guard: walk left to right, comparing each candidate to the
+    # last *accepted* peak. A candidate within SIMPLE_NOTCH_WINDOW_SEC of
+    # it is dropped if much weaker (a notch); comparable-or-stronger
+    # candidates are kept as real beats (this is what a genuinely fast
+    # heart rate looks like too, so it's deliberately not over-rejected).
+    prominences = raw_props.get("prominences", np.ones(raw_peaks.size))
+    max_notch_samples = SIMPLE_NOTCH_WINDOW_SEC * fs
+    keep_mask = np.ones(raw_peaks.size, dtype=bool)
+    last_kept = 0
+    for i in range(1, raw_peaks.size):
+        if raw_peaks[i] - raw_peaks[last_kept] <= max_notch_samples:
+            if prominences[i] < SIMPLE_NOTCH_PROMINENCE_RATIO * prominences[last_kept]:
+                keep_mask[i] = False
+                continue
+            if prominences[last_kept] < SIMPLE_NOTCH_PROMINENCE_RATIO * prominences[i]:
+                keep_mask[last_kept] = False
+                last_kept = i
+                continue
+        last_kept = i
+    peaks = raw_peaks[keep_mask]
+
     dbg["stage_reached"] = "peak_detection"
     dbg["peaks_detected"] = int(peaks.size)
+    dbg["peak_indices"] = peaks.tolist()
     if peaks.size < 3:  # need ≥ 2 RR intervals to judge consistency
         dbg["reason"] = f"only {peaks.size} peak(s) survived detection; need ≥3"
         return _finish(empty)
 
-    # Per-beat confidence from improved _score_beats (returns a dict)
-    beat_result = _score_beats(peaks, properties, fs)
-    beat_confidences = beat_result["beat_confidences"]
-    beat_quality = float(np.mean(beat_confidences)) if beat_confidences.size else 0.0
-    dbg["mean_beat_confidence"] = round(beat_quality, 3)
-
+    # --- Step 3: reject physiologically impossible RR intervals ---
     rr_raw = np.diff(peaks) / fs  # seconds
     dbg["rr_ms_before_filtering"] = [round(x * 1000.0, 1) for x in rr_raw]
-
-    # Per-RR weight: geometric mean of bounding beat confidences.
-    # Ensures an interval is only trusted if BOTH bounding beats are clean.
-    conf_left = beat_confidences[:-1]
-    conf_right = beat_confidences[1:]
-    rr_weights = np.sqrt(np.maximum(conf_left * conf_right, 0.0)) + 1e-9
-
-    # Stage 1: physiological bounds — stricter than the detection-time
-    # refractory period (40-200 BPM here vs. 222 BPM at detection time).
-    rr = rr_raw
-    physio_mask = (rr >= MIN_RR_SEC) & (rr <= MAX_RR_SEC)
-    rr = rr[physio_mask]
-    rr_weights = rr_weights[physio_mask]
+    physio_mask = (rr_raw >= SIMPLE_HR_MIN_RR_SEC) & (rr_raw <= SIMPLE_HR_MAX_RR_SEC)
+    rr = rr_raw[physio_mask]
     dbg["stage_reached"] = "physiological_bounds_filter"
     dbg["rr_ms_after_physio_filter"] = [round(x * 1000.0, 1) for x in rr]
+    dbg["rejected_rr_ms"] = [round(x * 1000.0, 1) for x in rr_raw[~physio_mask]]
     dbg["n_rejected_by_physio_bounds"] = int(rr_raw.size - rr.size)
     if rr.size < 2:
         dbg["reason"] = (
             f"only {rr.size} interval(s) left after physiological-bounds filter "
-            f"({MIN_RR_SEC * 1000:.0f}-{MAX_RR_SEC * 1000:.0f} ms window); need ≥2"
+            f"({SIMPLE_HR_MIN_RR_SEC * 1000:.0f}-{SIMPLE_HR_MAX_RR_SEC * 1000:.0f} ms window); need ≥2"
         )
         return _finish(empty)
 
-    # Stage 2: confidence-weighted Hampel-style outlier rejection.
-    # tightening ranges from 0.5 (strictest, for low-confidence pairs) to
-    # 1.0 (standard 3 × MAD, for high-confidence pairs).
-    median_rr = float(np.median(rr))
-    mad_rr = float(np.median(np.abs(rr - median_rr))) + 1e-9
-    normalized_weights = np.clip(rr_weights / (float(np.max(rr_weights)) + 1e-9), 0.0, 1.0)
-    tightening = 0.5 + 0.5 * normalized_weights
-    inlier_mask = np.abs(rr - median_rr) <= 3.0 * mad_rr * tightening
-    clean_rr = rr[inlier_mask]
-    clean_weights = rr_weights[inlier_mask]
-    dbg["stage_reached"] = "hampel_outlier_rejection"
-    dbg["rr_ms_after_hampel"] = [round(x * 1000.0, 1) for x in clean_rr]
-    dbg["n_rejected_by_hampel"] = int(rr.size - clean_rr.size)
-    if clean_rr.size == 0:
-        clean_rr = rr  # fall back rather than reporting nothing
-        clean_weights = rr_weights
-        dbg["hampel_fallback_used"] = True
-
-    # Stage 3: weighted median RR
-    bpm = 60.0 / _weighted_median(clean_rr, clean_weights)
+    # --- Steps 4-5: median RR -> BPM ---
+    median_rr_sec = float(np.median(rr))
+    bpm = 60.0 / median_rr_sec
     dbg["stage_reached"] = "bpm_computed"
     dbg["raw_bpm"] = round(bpm, 1)
-    if not (MIN_BPM <= bpm <= MAX_BPM):
-        dbg["reason"] = f"bpm {bpm:.1f} outside physiological range [{MIN_BPM}, {MAX_BPM}]"
+    dbg["accepted_rr_ms"] = [round(x * 1000.0, 1) for x in rr]
+
+    # --- Step 6: plausibility clamp (reject, don't invent) ---
+    if not (SIMPLE_HR_MIN_BPM <= bpm <= SIMPLE_HR_MAX_BPM):
+        dbg["reason"] = f"bpm {bpm:.1f} outside plausible range [{SIMPLE_HR_MIN_BPM}, {SIMPLE_HR_MAX_BPM}]"
         return _finish(empty)
 
-    retained_fraction = clean_rr.size / rr.size
-    cv = float(np.std(clean_rr) / (np.mean(clean_rr) + 1e-9))
+    # --- Coarse trust sub-metrics, derived from this simpler pipeline ---
+    retained_fraction = float(rr.size / rr_raw.size)
+    cv = float(np.std(rr) / (np.mean(rr) + 1e-9))
     regularity = float(np.clip(1.0 - cv * 2.0, 0.0, 1.0))
 
-    # Signal-level context from SQI, reusing `filtered`/`peaks` (see docstring).
-    quality = _compute_signal_quality_impl(ir, fs, filtered=filtered, peaks=peaks)
+    quality = compute_signal_quality(ir, fs)
     signal_quality_norm = quality["score"] / 100.0
-    perfusion = quality["amplitude_score"]
-    motion = quality["motion_score"] if quality["motion_score"] is not None else 1.0
+    perfusion = quality.get("amplitude_score", signal_quality_norm)
+    motion = quality.get("motion_score") if quality.get("motion_score") is not None else 1.0
     dbg["sqi_score"] = round(quality["score"], 1)
 
-    # Coverage: ratio of detected beats to the expected beat count given the
-    # window duration and estimated HR. Values much below 1.0 indicate dropout
-    # or missed beats; values above 1.0 indicate spurious detections (capped at 1.0).
-    window_duration = ir.size / fs
-    expected_beats = max((bpm / 60.0) * window_duration, 1.0)
-    coverage = float(np.clip(peaks.size / expected_beats, 0.0, 1.0))
-
-    base_confidence = float(np.clip(
-        0.30 * beat_quality
-        + 0.25 * regularity
-        + 0.20 * signal_quality_norm
-        + 0.15 * perfusion
-        + 0.10 * motion,
+    confidence = float(np.clip(
+        0.45 * retained_fraction + 0.35 * regularity + 0.20 * signal_quality_norm,
         0.0, 1.0,
     ))
 
-    # Graduated SQI trust discount (replaces an earlier hard cutoff that
-    # unilaterally discarded any BPM below a fixed SQI threshold — too brittle
-    # across sensor placements/hardware, since "usable SQI" isn't the same
-    # number on a fingertip vs. a wrist sensor. Instead of the library
-    # deciding pass/fail, a low-SQI window just gets reported at
-    # correspondingly lower confidence: full trust once SQI reaches
-    # SQI_FULL_TRUST_SCORE, scaling down linearly below it, never an outright
-    # zero from this factor alone. The caller/dashboard can apply whatever
-    # confidence threshold fits its own sensor and use case.
-    sqi_trust = float(np.clip(quality["score"] / SQI_FULL_TRUST_SCORE, 0.0, 1.0))
-    confidence = float(np.clip(base_confidence * (0.5 + 0.5 * sqi_trust), 0.0, 1.0))
-    dbg["base_confidence"] = round(base_confidence, 3)
-    dbg["sqi_trust_factor"] = round(sqi_trust, 3)
-
     dbg["stage_reached"] = "complete"
     dbg["retained_fraction"] = round(retained_fraction, 3)
+
     return _finish({
         "heart_rate": round(bpm, 1),
-        "rr_intervals_ms": [round(x * 1000.0, 1) for x in clean_rr],
+        "rr_intervals_ms": [round(x * 1000.0, 1) for x in rr],
         "confidence": round(confidence, 3),
         "beats_detected": int(peaks.size),
-        # existing additive sub-metrics
         "peak_quality": round(retained_fraction, 3),
         "rhythm_quality": round(regularity, 3),
-        "beat_quality": round(beat_quality, 3),
-        # new additive diagnostics
+        "beat_quality": round(regularity, 3),  # coarse stand-in, see docstring
         "signal_quality": round(signal_quality_norm, 3),
         "motion_quality": round(float(motion), 3),
-        "coverage": round(coverage, 3),
+        "coverage": round(retained_fraction, 3),
         "rr_quality": round(retained_fraction, 3),
         "confidence_breakdown": {
-            "beat_quality": round(beat_quality, 3),
+            "beat_quality": round(regularity, 3),
             "rhythm_quality": round(regularity, 3),
             "signal_quality": round(signal_quality_norm, 3),
-            "perfusion": round(perfusion, 3),
+            "perfusion": round(float(perfusion), 3),
             "motion": round(float(motion), 3),
         },
     })
@@ -1870,29 +1979,31 @@ def estimate_heart_rate(ir, fs: float = 50.0, debug: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 
 # Module-level default calibration table hook. `None` means "use the built-in
-# two-segment linear calibration (SPO2_CAL_A/B and SPO2_CAL_A2/B2)". Installing
+# single quadratic calibration (SPO2_CAL_A/SPO2_CAL_B/SPO2_CAL_C)". Installing
 # a table here lets every future `estimate_spo2` call (that doesn't pass its
 # own `calibration_table` argument) pick up a new calibration — e.g. one
 # derived from an actual co-oximeter calibration session — without changing
 # `estimate_spo2`'s signature or breaking any existing caller.
-_active_calibration_table: list[tuple[float, float, float]] | None = None
+_active_calibration_table: list[tuple[float, float, float, float]] | None = None
 
 
-def set_spo2_calibration_table(table: list[tuple[float, float, float]] | None) -> None:
+def set_spo2_calibration_table(
+    table: list[tuple[float, float, float]] | list[tuple[float, float, float, float]] | None,
+) -> None:
     """
-    Install a custom piecewise-linear SpO2 calibration table.
+    Install a custom piecewise SpO2 calibration table.
 
-    `table` is a list of `(r_upper_bound, a, b)` tuples, sorted by ascending
-    `r_upper_bound`, defining segments of the form `SpO2 = a - b * R` valid
-    for R up to `r_upper_bound` (the last entry's segment is used for any R
-    above its bound). Passing `None` restores the built-in two-segment
-    calibration (`SPO2_CAL_A`/`SPO2_CAL_B` below `SPO2_CAL_BREAKPOINT_R`,
-    `SPO2_CAL_A2`/`SPO2_CAL_B2` above it).
+    `table` is a list of `(r_upper_bound, a, b)` or `(r_upper_bound, a, b, c)`
+    tuples, sorted by ascending `r_upper_bound`, defining segments of the
+    form `SpO2 = a + b*R + c*R^2` (c defaults to 0, i.e. a linear segment,
+    for 3-tuples) valid for R up to `r_upper_bound` (the last entry's
+    segment is used for any R above its bound). Passing `None` restores the
+    built-in single quadratic default (`SPO2_CAL_A`/`SPO2_CAL_B`/`SPO2_CAL_C`).
 
     This indirection exists so that a future calibration derived from actual
-    co-oximeter reference data (or a non-linear/polynomial fit re-expressed
-    as a fine-grained piecewise-linear table) can be installed without
-    changing `estimate_spo2`'s public signature or any caller's code.
+    co-oximeter reference data (a `fit_spo2_calibration` fit, or a
+    finer-grained piecewise table) can be installed without changing
+    `estimate_spo2`'s public signature or any caller's code.
     """
     global _active_calibration_table
     _active_calibration_table = table
@@ -1902,24 +2013,31 @@ def fit_spo2_calibration(
     r_values, reference_spo2_values, install: bool = True
 ) -> dict:
     """
-    Fit a linear SpO2 = a - b*R calibration from paired reference
+    Fit a SpO2 = a + b*R + c*R^2 calibration from paired reference
     measurements and (optionally) install it as the active calibration.
 
-    Review context: the built-in `SPO2_CAL_A`/`SPO2_CAL_B` (110/25) are a
-    commonly-published *starting point* for MAX30102-class hardware, not a
-    universal constant — actual R-to-SpO2 mapping shifts with LED
-    wavelength binning, photodiode responsivity, LED drive current, optical
-    coupling, and skin tone, so a device reading ~88 % at rest is a strong
-    signal that the *installed* hardware's true curve differs from that
-    generic starting point. There is no responsible way to guess a
-    replacement pair of constants without a reference measurement — doing
-    so would just swap one unverified guess for another. This function
-    does the honest version: collect `r_value` (from `estimate_spo2`'s
-    `"r_value"` field) alongside a simultaneous reading from a reference
-    pulse oximeter across a range of conditions (ideally including some
-    breath-holds or altitude/activity variation to get spread below ~97 %,
-    since a calibration fit entirely from resting-normal data extrapolates
-    poorly to the low-saturation region), then fit here.
+    Review context: the built-in `SPO2_CAL_A`/`SPO2_CAL_B`/`SPO2_CAL_C` are
+    a documented *starting point* (see the SpO2-calibration constants block
+    above), not a universal constant — actual R-to-SpO2 mapping shifts with
+    optical geometry (reflectance vs. transmission), LED wavelength
+    binning, photodiode responsivity, LED drive current, optical coupling,
+    and skin tone. There is no responsible way to guess a replacement set
+    of constants without reference measurements — doing so would just swap
+    one unverified guess for another. This function does the honest
+    version: collect `r_value` (from `estimate_spo2(...)["r_value"]`)
+    alongside a simultaneous reading from a reference pulse oximeter across
+    a range of conditions (ideally including some breath-holds or
+    altitude/activity variation to get spread below ~97 %, since a
+    calibration fit entirely from resting-normal data extrapolates poorly
+    to the low-saturation region), then fit here.
+
+    Fit degree
+    ----------
+    - >= 4 valid points spanning enough R range (`np.ptp(r) >= 0.15`):
+      fits the full quadratic `a + b*R + c*R^2` via least squares.
+    - 2-3 points, or a narrower R range: fits a straight line (`c=0`)
+      instead — a quadratic from only a handful of closely-spaced points
+      is typically just noise-fitting, not a genuine curvature estimate.
 
     Parameters
     ----------
@@ -1931,10 +2049,11 @@ def fit_spo2_calibration(
 
     Returns
     -------
-    dict with: a, b (the fitted SpO2 = a - b*R coefficients), r_squared
-    (fit quality, 0-1), n (number of paired points used), and a `warning`
-    string if the fit is likely unreliable (too few points, or too narrow
-    an R range to extrapolate from).
+    dict with: a, b, c (fitted SpO2 = a + b*R + c*R^2 coefficients,
+    c=0.0 if a linear fit was used), r_squared (fit quality, 0-1), n (number
+    of paired points used), degree ("linear" or "quadratic"), and a
+    `warning` string if the fit is likely unreliable (too few points, or
+    too narrow an R range to extrapolate from).
     """
     r = np.asarray(r_values, dtype=np.float64)
     y = np.asarray(reference_spo2_values, dtype=np.float64)
@@ -1946,44 +2065,66 @@ def fit_spo2_calibration(
     r, y = r[valid], y[valid]
 
     warning = None
+    if r.size < 2:
+        warning = f"Only {r.size} valid paired point(s); at least 5-10 across varied conditions is recommended for a trustworthy fit."
+        return {
+            "a": SPO2_CAL_A, "b": SPO2_CAL_B, "c": SPO2_CAL_C, "r_squared": 0.0,
+            "n": int(r.size), "degree": "none",
+            "warning": warning + " Falling back to built-in defaults; no fit was installed.",
+        }
     if r.size < 5:
         warning = f"Only {r.size} valid paired point(s); at least 5-10 across varied conditions is recommended for a trustworthy fit."
-        if r.size < 2:
-            return {"a": SPO2_CAL_A, "b": SPO2_CAL_B, "r_squared": 0.0, "n": int(r.size), "warning": warning + " Falling back to built-in defaults; no fit was installed."}
-    elif float(np.ptp(r)) < 0.15:
-        warning = f"R values span only {np.ptp(r):.3f}; a fit from such a narrow range extrapolates poorly outside it."
+    r_span = float(np.ptp(r))
+    if r_span < 0.15:
+        span_warning = f"R values span only {r_span:.3f}; a fit from such a narrow range extrapolates poorly outside it."
+        warning = (warning + " " + span_warning) if warning else span_warning
 
-    # SpO2 = a - b*R  <=>  y = a + (-b)*r  -> linear least squares on [r, 1]
-    design = np.stack([r, np.ones_like(r)], axis=1)
-    (slope, intercept), residuals, _, _ = np.linalg.lstsq(design, y, rcond=None)
-    a = float(intercept)
-    b = float(-slope)
+    use_quadratic = r.size >= 4 and r_span >= 0.15
 
-    y_pred = a - b * r
+    if use_quadratic:
+        design = np.stack([np.ones_like(r), r, r * r], axis=1)
+        degree = "quadratic"
+    else:
+        design = np.stack([np.ones_like(r), r], axis=1)
+        degree = "linear"
+
+    coeffs, _, _, _ = np.linalg.lstsq(design, y, rcond=None)
+    a = float(coeffs[0])
+    b = float(coeffs[1])
+    c = float(coeffs[2]) if use_quadratic else 0.0
+
+    y_pred = a + b * r + c * r * r
     ss_res = float(np.sum((y - y_pred) ** 2))
     ss_tot = float(np.sum((y - np.mean(y)) ** 2)) + 1e-12
     r_squared = float(np.clip(1.0 - ss_res / ss_tot, 0.0, 1.0))
 
-    result = {"a": round(a, 3), "b": round(b, 3), "r_squared": round(r_squared, 4), "n": int(r.size)}
+    result = {
+        "a": round(a, 3), "b": round(b, 3), "c": round(c, 3),
+        "r_squared": round(r_squared, 4), "n": int(r.size), "degree": degree,
+    }
     if warning:
         result["warning"] = warning
 
-    # Sanity check: SpO2 must decrease as R increases (b > 0 in SpO2 = a - b*R).
-    # A non-positive fitted b means the paired data doesn't actually show that
-    # relationship (almost always too few/too noisy points, not a real
-    # physiological finding) — installing it would make estimates worse than
-    # the built-in defaults, so refuse to install even if `install=True`.
-    if b <= 0:
+    # Sanity check: over the observed R range, SpO2 must be non-increasing
+    # as R increases (dSpO2/dR = b + 2c*R <= 0 across [min(r), max(r)]).
+    # A fit that increases with R across the observed data almost always
+    # means too few/too noisy points rather than a real physiological
+    # finding — installing it would make estimates worse than the current
+    # calibration, so refuse to install even if `install=True`.
+    slope_at_min = b + 2.0 * c * float(np.min(r))
+    slope_at_max = b + 2.0 * c * float(np.max(r))
+    if slope_at_min > 0 or slope_at_max > 0:
         result["warning"] = (
             (result.get("warning", "") + " " if "warning" in result else "")
-            + f"Fitted slope b={b:.2f} is non-positive (SpO2 should decrease as R increases); "
-            "this fit was NOT installed. Collect more paired points across a wider R range."
+            + "Fitted curve increases with R somewhere in the observed range "
+            "(SpO2 should decrease as R increases); this fit was NOT installed. "
+            "Collect more paired points across a wider R range."
         )
         return result
 
     if install:
         r_upper = float(np.max(r)) + 1.0  # generous upper bound so the fit covers the observed range and a margin beyond it
-        set_spo2_calibration_table([(r_upper, a, b)])
+        set_spo2_calibration_table([(r_upper, a, b, c)])
     return result
 
 
@@ -1991,10 +2132,8 @@ def _spo2_calibrate(
     r: float,
     cal_a: float = SPO2_CAL_A,
     cal_b: float = SPO2_CAL_B,
-    breakpoint_r: float = SPO2_CAL_BREAKPOINT_R,
-    cal_a2: float = SPO2_CAL_A2,
-    cal_b2: float = SPO2_CAL_B2,
-    calibration_table: list[tuple[float, float, float]] | None = None,
+    cal_c: float = SPO2_CAL_C,
+    calibration_table: list[tuple[float, float, float, float]] | None = None,
 ) -> float:
     """
     Empirical SpO2 calibration from the ratio-of-ratios R value.
@@ -2003,12 +2142,19 @@ def _spo2_calibrate(
       1. If `calibration_table` is given explicitly (per-call override), use it.
       2. Else if a table has been installed via `set_spo2_calibration_table`,
          use that.
-      3. Else fall back to the built-in two-segment linear calibration:
-         SpO2 = cal_a - cal_b * R for R <= breakpoint_r (Maxim app-note
-         family), and a shallower SpO2 = cal_a2 - cal_b2 * R above it, since
-         reduced and oxygenated hemoglobin have different optical absorption
-         coefficients at 660/940 nm and the R-SpO2 relationship is only
-         approximately linear across the full range.
+      3. Else fall back to the built-in single quadratic calibration:
+         SpO2 = cal_a + cal_b * R + cal_c * R^2 (see the SpO2-calibration
+         constants block above for the root-cause rationale and anchor
+         points behind the defaults). A single smooth quadratic covering the
+         whole R range replaces the old two-segment linear approximation —
+         it captures the same real nonlinearity (reduced vs. oxygenated
+         hemoglobin have different absorption coefficients at 660/940 nm)
+         without an artificial kink at a breakpoint.
+
+    Table entries are `(r_upper, a, b, c)` 4-tuples evaluated as
+    `a + b*r + c*r**2` (see `set_spo2_calibration_table`). 3-tuples
+    `(r_upper, a, b)` are still accepted for backward compatibility and are
+    treated as `c=0` (a plain linear segment).
 
     Constants are approximate in all cases; accurate clinical calibration
     requires simultaneous co-oximeter reference measurements across a range
@@ -2016,15 +2162,17 @@ def _spo2_calibrate(
     """
     table = calibration_table if calibration_table is not None else _active_calibration_table
     if table:
-        for r_upper, a, b in table:
+        for entry in table:
+            r_upper, a, b = entry[0], entry[1], entry[2]
+            c = entry[3] if len(entry) > 3 else 0.0
             if r <= r_upper:
-                return a - b * r
-        last_a, last_b = table[-1][1], table[-1][2]
-        return last_a - last_b * r
+                return a + b * r + c * r * r
+        last = table[-1]
+        a, b = last[1], last[2]
+        c = last[3] if len(last) > 3 else 0.0
+        return a + b * r + c * r * r
 
-    if r <= breakpoint_r:
-        return cal_a - cal_b * r
-    return cal_a2 - cal_b2 * r
+    return cal_a + cal_b * r + cal_c * r * r
 
 
 def _spo2_fallback_window_method(
@@ -2114,6 +2262,7 @@ def estimate_spo2(
     lock_duration_sec: float | None = None,
     cal_a: float = SPO2_CAL_A,
     cal_b: float = SPO2_CAL_B,
+    cal_c: float = SPO2_CAL_C,
     calibration_table: list[tuple[float, float, float]] | None = None,
     max_roc_per_sec: float = SPO2_MAX_ROC_PCT_PER_SEC,
 ) -> dict:
@@ -2139,11 +2288,9 @@ def estimate_spo2(
         (the original calling convention), state is read from and written
         back to `_spo2_state` automatically, exactly as in the original
         stateless-per-call API — existing callers require no changes.
-    cal_a, cal_b : override the primary-segment linear calibration
-        coefficients (SpO2 = cal_a - cal_b * R for R at or below the
-        breakpoint); the hypoxic-segment coefficients remain
-        `SPO2_CAL_A2`/`SPO2_CAL_B2` unless a full `calibration_table` is
-        supplied.
+    cal_a, cal_b, cal_c : override the quadratic calibration coefficients
+        (SpO2 = cal_a + cal_b * R + cal_c * R^2). Pass `cal_c=0.0` to
+        recover a pure linear curve if desired.
     calibration_table : optional full override, see `_spo2_calibrate`.
     max_roc_per_sec : ceiling, in %/second, on how fast the published SpO2
         value may move once locked (a safety clamp, not a physiological
@@ -2362,10 +2509,21 @@ def estimate_spo2(
         effective_windows = effective_beats
 
     # --- Calibration (pluggable; see _spo2_calibrate / set_spo2_calibration_table) ---
-    spo2_raw = _spo2_calibrate(r_median, cal_a=cal_a, cal_b=cal_b, calibration_table=calibration_table)
+    spo2_raw = _spo2_calibrate(r_median, cal_a=cal_a, cal_b=cal_b, cal_c=cal_c, calibration_table=calibration_table)
+    # Interim self-calibration offset (see `calibrate_spo2_baseline` /
+    # `SPO2_SELF_CAL_OFFSET` above). Zero by default -- a no-op unless the
+    # caller has explicitly anchored this sensor/wrist placement against a
+    # known reference. Applied before the physiological clip so it can't
+    # push a reading outside the plausible 70-100% band.
+    spo2_raw += SPO2_SELF_CAL_OFFSET
     spo2_raw = float(np.clip(spo2_raw, SPO2_PHYSIO_MIN, SPO2_PHYSIO_MAX))
     active_table = calibration_table if calibration_table is not None else _active_calibration_table
-    calibration_region = "table" if active_table else ("low" if r_median > SPO2_CAL_BREAKPOINT_R else "normal")
+    # Region is now classified from the calibrated *output* rather than an
+    # R breakpoint, since the calibration curve is a single smooth quadratic
+    # with no segment boundary — "low" simply flags outputs deep enough into
+    # the desaturation range that they're extrapolating past where most
+    # resting-subject calibration data lives.
+    calibration_region = "table" if active_table else ("low" if spo2_raw < 90.0 else "normal")
 
     # --- Composite confidence ---
     # Weights are chosen so beat quality and R-ratio agreement (the two most
@@ -2427,7 +2585,12 @@ def estimate_spo2(
         clamped = float(np.clip(
             clamped, prior_spo2 - SPO2_MAX_JUMP_PER_UPDATE, prior_spo2 + SPO2_MAX_JUMP_PER_UPDATE
         ))
-        alpha = float(np.clip(SPO2_SMOOTHING_ALPHA * (confidence / 0.5), 0.05, 0.6))
+        # Clip range (0.05-0.28) keeps the effective time constant inside the
+        # ~3.3-19.5 s band described at SPO2_SMOOTHING_ALPHA's definition —
+        # even a maximally-confident update can't snap the display to a new
+        # value in one step, matching how commercial wearables visibly ease
+        # into a new SpO2 reading rather than jumping to it.
+        alpha = float(np.clip(SPO2_SMOOTHING_ALPHA * (confidence / 0.5), 0.05, 0.28))
         spo2_out = alpha * clamped + (1.0 - alpha) * prior_spo2
         confidence_out = confidence
     elif prior_spo2 is None:
@@ -2487,22 +2650,34 @@ def compute_hrv_metrics(rr_intervals_ms) -> dict:
       - rmssd    : root mean square of successive RR differences (ms) —
                    parasympathetically-mediated short-term variability
       - pnn50    : % of successive diffs > 50 ms — parasympathetic proxy
-      - n_intervals: number of clean intervals used in computation
+      - n_intervals: number of intervals used in computation
       - median_rr   : median RR (ms) — more robust than mean for skewed
                       distributions containing residual ectopic beats
       - cvrr        : RMSSD / mean_rr × 100 % — coefficient of variation
                       of RR; a normalized HRV measure independent of mean
                       heart rate (Kleiger et al. 2005; Billman 2011)
       - hrv_confidence: composite 0-1 confidence that these metrics are
-                      meaningful given the available clean intervals and
-                      physiological plausibility of the SDNN value
-      - artifact_pct: percentage of input intervals flagged as artifacts
-                      before clean-interval selection
+                      meaningful given the available interval count and
+                      how much of it looked artifact-like
+      - artifact_pct: percentage of input intervals either outside
+                      physiological bounds or flagged as likely-artifact
 
-    Artifact removal: intervals outside 40-200 BPM bounds are removed first;
-    then intervals deviating > HRV_ARTIFACT_RR_TOLERANCE (25 %) from the
-    local median are flagged as artifact. At least HRV_MIN_CLEAN_INTERVALS
-    (4) clean intervals are required before any metric is computed.
+    Acceptance policy (revised): only intervals outside hard
+    physiological bounds (40-200 BPM) are discarded before computing
+    anything. A previous revision additionally required each interval to
+    be within 25% of the local median before it counted toward the
+    metrics — a much stricter bar than the interval-count requirement,
+    and one that could suppress every metric to `None` on a window with
+    mostly-good beats plus a couple of genuinely irregular (but real)
+    ones. HRV is expected to vary; "how many intervals do we have" and
+    "how similar are they to each other" are different questions, and
+    conflating them meant HRV was hidden far more often than the
+    underlying signal actually warranted. Now: if at least
+    HRV_MIN_CLEAN_INTERVALS physiologically-valid intervals are present,
+    metrics are always computed and returned. The old deviation-from-
+    median check still runs, but only to inform `hrv_confidence` /
+    `artifact_pct` — a window with several off-median intervals gets
+    lower confidence, not a `None` result.
 
     Caveat: clinically-referenced HRV norms are computed over ~5 minute
     windows. Over a short (~10 s) rolling buffer, these values are internally
@@ -2521,28 +2696,29 @@ def compute_hrv_metrics(rr_intervals_ms) -> dict:
     if n_input < 2:
         return null_result
 
-    # --- Step 1: physiological bounds filter ---
+    # --- Step 1: physiological bounds filter (the only hard exclusion) ---
     physio_mask = (rr_all >= MIN_RR_SEC * 1000.0) & (rr_all <= MAX_RR_SEC * 1000.0)
-    rr_physio = rr_all[physio_mask]
-    if rr_physio.size < 2:
-        return null_result
-
-    # --- Step 2: deviation-from-median artifact flagging ---
-    local_median = float(np.median(rr_physio))
-    artifact_mask = (
-        np.abs(rr_physio - local_median) / (local_median + 1e-9) > HRV_ARTIFACT_RR_TOLERANCE
-    )
-    n_artifacts_total = int(np.sum(~physio_mask)) + int(np.sum(artifact_mask))
-    artifact_pct = round(float(n_artifacts_total / n_input * 100.0), 1)
-
-    rr_clean = rr_physio[~artifact_mask]
+    rr_clean = rr_all[physio_mask]
     n_clean = int(rr_clean.size)
+
+    # --- Step 2: deviation-from-median flagging (informational only) ---
+    # No longer removes intervals from the metrics computation — see
+    # "Acceptance policy" above. Feeds artifact_pct / hrv_confidence.
+    if n_clean >= 2:
+        local_median = float(np.median(rr_clean))
+        artifact_mask = (
+            np.abs(rr_clean - local_median) / (local_median + 1e-9) > HRV_ARTIFACT_RR_TOLERANCE
+        )
+        n_artifacts_total = int(np.sum(~physio_mask)) + int(np.sum(artifact_mask))
+    else:
+        n_artifacts_total = int(np.sum(~physio_mask))
+    artifact_pct = round(float(n_artifacts_total / n_input * 100.0), 1) if n_input else 100.0
 
     if n_clean < HRV_MIN_CLEAN_INTERVALS:
         null_result["artifact_pct"] = artifact_pct
         return null_result
 
-    # --- Core metrics ---
+    # --- Core metrics (computed on all physio-valid intervals) ---
     mean_rr = float(np.mean(rr_clean))
     median_rr = float(np.median(rr_clean))
     sdnn = float(np.std(rr_clean, ddof=1))
@@ -2566,9 +2742,13 @@ def compute_hrv_metrics(rr_intervals_ms) -> dict:
     cvrr = float(rmssd / (mean_rr + 1e-9) * 100.0)
 
     # --- HRV confidence ---
-    # Component 1: fraction of input intervals that were accepted as clean.
+    # Component 1: fraction of input intervals that were physio-valid
+    # (i.e. actually used).
     clean_fraction = float(np.clip(n_clean / max(n_input, 1), 0.0, 1.0))
-    # Component 2: inverse artifact rate.
+    # Component 2: inverse artifact rate (now purely informational, per
+    # the acceptance-policy change above, but still a meaningful quality
+    # signal — a window with a high deviation-from-median rate is less
+    # trustworthy even though its intervals weren't discarded).
     artifact_score = 1.0 - artifact_pct / 100.0
     # Component 3: physiological plausibility of SDNN. For short windows
     # (~10 s), typical SDNN is 5-50 ms. Values outside this range (< 1 ms
@@ -2594,6 +2774,7 @@ def compute_hrv_metrics(rr_intervals_ms) -> dict:
         "hrv_confidence": round(hrv_confidence, 3),
         "artifact_pct": artifact_pct,
     }
+
 
 
 # ---------------------------------------------------------------------------

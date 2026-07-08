@@ -113,20 +113,16 @@ def update_dashboard(_):
                 "-"
             )
         ),
-        create_card(
-            "IR",
-            metrics.get(
-                "latest_ir",
-                0
-            )
+       create_card(
+            "Heart Rate",
+            f"{metrics.get('heart_rate', '--')} BPM"
         ),
+
         create_card(
-            "RED",
-            metrics.get(
-                "latest_red",
-                0
-            )
+            "SpO₂",
+            f"{metrics.get('spo2', '--')} %"
         ),
+        
         create_card(
             "Finger",
             "YES" if metrics.get("finger_detected", False) else "NO"
