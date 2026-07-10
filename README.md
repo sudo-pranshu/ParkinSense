@@ -6,6 +6,7 @@
 ![Platform](https://img.shields.io/badge/Platform-XIAO%20nRF52840%20Sense-blue)
 ![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20IMU%20%2B%20MAX30102-red)
 ![BLE](https://img.shields.io/badge/BLE-104Hz%20Streaming-success)
+![Pipeline](https://img.shields.io/badge/Pipeline-V2.5-brightgreen)
 ![PPG](https://img.shields.io/badge/PPG-HR%20%7C%20HRV%20%7C%20SpO₂-blueviolet)
 ![Activity](https://img.shields.io/badge/Activity-Steps%20%7C%20Cadence%20%7C%20Distance-yellow)
 ![Dashboard](https://img.shields.io/badge/Dashboard-Live%20Plotly-orange)
@@ -21,9 +22,11 @@
 ## 📑 Table of Contents
 
 - [Overview](#-overview)
+- [Why ParkinSense?](#-why-parkinsense)
 - [Core Features](#-core-features)
 - [Development Branches](#-development-branches)
 - [System Architecture](#-system-architecture)
+- [Design Principles](#-design-principles)
 - [Hardware Platform](#-hardware-platform)
 - [Firmware](#-firmware)
 - [BLE Protocol](#-ble-protocol)
@@ -57,6 +60,12 @@ The project now runs **three parallel processing pipelines** from the same senso
 The PPG pipeline currently provides heart rate, RR intervals, heart rate variability (RMSSD, SDNN, Mean RR, pNN50), a SpO₂ estimate, signal quality scoring, finger detection, and sensor status classification. These are research-grade estimates intended for signal-processing development and are **not** medical-grade or clinically validated measurements.
 
 The step tracking pipeline is a from-scratch accelerometer-based pedestrian step detector — not a repackaged third-party library — built around an adaptive threshold, motion-state gating (so tremor or handling can't be miscounted as steps), and bout-based active-minute accounting.
+
+<br>
+
+## 🤔 Why ParkinSense?
+
+ParkinSense was built to explore how modern wearable architectures can be applied to continuous neurological monitoring. Rather than focusing on a single algorithm or an isolated dataset, it integrates embedded firmware, Bluetooth Low Energy streaming, real-time signal processing, physiological sensing, activity tracking, digital biomarker extraction, live visualization, and offline dataset generation into one modular platform. The architecture is designed to support future machine-learning models, longitudinal monitoring, and additional wearable health features, while remaining suitable for reproducible research.
 
 <br>
 
@@ -173,7 +182,7 @@ Adds physiological sensing and activity tracking to the wearable platform. This 
 - IR / RED streaming
 - Finger detection with ON/OFF hysteresis
 - Signal Quality Index + sensor status classification
-- PPG Processing Pipeline (`PPGProcessor`)
+- PPG Processing Pipeline (`PPGProcessor`, `ppg/ppg_processor.py` + `ppg/algorithms.py`)
 - Heart rate estimation (adaptive peak detection, RR extraction, EMA smoothing)
 - Heart rate variability (RMSSD, SDNN, Mean RR, pNN50)
 - SpO₂ estimation with signal-lock state machine
@@ -240,6 +249,18 @@ Adds physiological sensing and activity tracking to the wearable platform. This 
 
 <br>
 
+## 🧭 Design Principles
+
+- Modular processing pipelines, each independently testable
+- Single responsibility per module
+- Runtime independent from the dashboard
+- Continuous streaming architecture
+- Research-first implementation
+- Extensible sensor-fusion framework
+- Backward-compatible, versioned BLE protocol
+
+<br>
+
 ## 🔌 Hardware Platform
 
 ### Wearable Device
@@ -269,6 +290,16 @@ Adds physiological sensing and activity tracking to the wearable platform. This 
 | PPG Analysis Window | 10 seconds (rolling) |
 | Step Detector Adaptive Window | ~2 seconds |
 | Runtime | Continuous |
+
+### Processing Rates
+
+| Pipeline | Rate |
+|----------|------|
+| Motion | 104 Hz |
+| PPG | ~50 Hz |
+| Step Tracking | 104 Hz (shares the accelerometer stream with Motion) |
+| Dashboard Refresh | 10 Hz (100 ms interval) |
+| CSV Logger | Continuous |
 
 <br>
 
@@ -336,7 +367,7 @@ Each BLE notification contains one complete sensor packet.
 
 ## 🔬 Signal Processing Pipeline
 
-ParkinSense runs **three independent processing pipelines** from the same BLE packet stream — a motion pipeline for tremor biomarkers, a PPG pipeline for cardiac biomarkers, and a step-tracking pipeline for activity biomarkers. Each stage has a single responsibility, so algorithms can be validated, replaced, or extended without affecting the rest of the system.
+ParkinSense runs **three parallel processing pipelines** from the same BLE packet stream — a motion pipeline for tremor biomarkers, a PPG pipeline for cardiac biomarkers, and a step-tracking pipeline for activity biomarkers. Each stage has a single responsibility, so algorithms can be validated, replaced, or extended without affecting the rest of the system.
 
 ```
 Raw BLE Packet
@@ -435,7 +466,7 @@ A beat-by-beat ratio-of-ratios estimate (with RED/IR peak alignment validation, 
 Overall HR confidence is discounted according to the Motion Pipeline's reported activity state, so a walking or running window is trusted less than a resting one without being discarded outright.
 
 **Physiological Biomarkers**
-Heart rate, RR intervals, HRV metrics, SpO₂, sensor status, and confidence/quality sub-scores are emitted for logging and the dashboard.
+Heart rate, RR intervals, HRV metrics, SpO₂ estimate, sensor status, and confidence/quality sub-scores are emitted for logging and the dashboard.
 
 <br>
 
@@ -538,7 +569,7 @@ All of the above are research-grade signal-processing estimates, intended for al
 ### PPG Fusion Module
 The PPG Fusion layer (`PPGProcessor`) acts as the stateful interface between the optical sensor and the analytics pipeline, maintaining rolling buffers, EMA smoothing state, finger-presence hysteresis, and SpO₂ publish throttling across calls.
 
-**Current:** IR validation · RED validation · finger detection · sensor availability · signal quality · heart rate · RR intervals · HRV · SpO₂ · motion-aware confidence fusion
+**Current:** IR validation · RED validation · finger detection · sensor availability · signal quality · heart rate · RR intervals · HRV · SpO₂ estimation · motion-aware confidence fusion
 
 **Future:** Respiratory rate · recovery metrics
 
@@ -620,6 +651,8 @@ The three trend graphs (gyroscope, vitals, cadence) show a rolling **60-second**
 
 **Coming soon:** Recovery · Sleep Analytics · Battery Status · Activity Type · HRV, SQI, Sensor Status, and IR/RED visualization
 
+**Architecture note:** the dashboard is intentionally decoupled from the processing pipelines. All computation happens inside Runtime V2; the dashboard only reads the exported `realtime_metrics_v2.json` and `realtime_capture_v2.csv` files and never imports the pipeline modules directly. This means the motion, PPG, and step-counter pipelines can be tested, replayed, or replaced without touching the UI at all.
+
 <br>
 
 ## 📁 Repository Structure
@@ -648,10 +681,18 @@ ParkinSense
 │       ├── models/
 │       ├── pipeline/
 │       ├── pipelines/
+│       ├── ppg/
+│       │   ├── __init__.py
+│       │   ├── algorithms.py
+│       │   └── ppg_processor.py
 │       ├── realtime/
 │       ├── replay/
 │       ├── runtime/
-│       └── utils/
+│       ├── utils/
+│       ├── __init__.py
+│       ├── config.py
+│       ├── live_dashboard.py
+│       └── record_imu.py
 │
 ├── docs/
 ├── hardware/
@@ -815,7 +856,7 @@ RED            : 61871
 =====================================
 ```
 
-### CSV Logger
+### Realtime Dataset Logging
 
 Every processed sample is logged to `realtime_capture_v2.csv` for offline replay, validation, and future ML dataset generation. Logged fields include: timestamp, raw accelerometer and gyroscope samples, IR/RED, heart rate, RR intervals, RMSSD, SDNN, Mean RR, pNN50, SpO₂, SQI, sensor status, motion state, tremor score, step count, cadence, distance, walking flag, active minutes, and step/walking confidence.
 
@@ -886,7 +927,7 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - [x] Heart Rate
 - [x] RR Interval Extraction
 - [x] HRV (RMSSD, SDNN, Mean RR, pNN50)
-- [x] SpO₂
+- [x] SpO₂ Estimation
 - [x] Motion-aware HR Confidence
 
 **Phase 4 — Activity Monitoring**
@@ -942,18 +983,32 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - Human activity recognition
 - Biomedical signal processing
 - Edge AI for wearables
+- Sensor fusion
+- Wearable computing
+- Embedded systems
+- Biomedical AI
 
 <br>
 
 ## 🚀 Future Wearable Features
 
-- Activity type classification (walk / run / climb)
+**Health**
 - Sleep detection
 - Recovery score
 - Respiratory rate
+- Stress metrics
+
+**Activity**
+- Activity type classification (walk / run / climb)
+- VO₂ max
+- Calorie estimation
+- Floors climbed
+
+**Platform**
 - Battery monitoring
 - Mobile companion app
 - Cloud synchronization
+- OTA firmware updates
 - Longitudinal analytics
 - Personalized models
 - Digital therapeutics
