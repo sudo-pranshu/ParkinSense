@@ -8,8 +8,26 @@ from bleak import BleakScanner
 from bleak import BleakClient
 from collections import deque
 from dashboard.python.pipelines.motion_pipeline import MotionPipeline
+from dashboard.python.activity.step_counter import StepCounter
 
 DEVICE_NAME = "ParkinSense"
+
+# Bumped whenever the runtime/pipeline processing logic changes in a way
+# that would affect how a captured dataset should be interpreted later.
+PIPELINE_VERSION = "2.1.0"
+
+# Firmware version isn't queryable over BLE yet, so this is a manual
+# placeholder -- update it to match whatever firmware build is flashed
+# on the XIAO nRF52840 Sense when a capture is taken.
+FIRMWARE_VERSION = "unknown"
+
+# Versioned independently from PIPELINE_VERSION because the step-counting
+# and PPG (heart rate / SpO2 / HRV) algorithms evolve on their own
+# schedules. Bump whichever one changes so a dataset always records
+# exactly which algorithm version produced its step/vitals columns,
+# even if the rest of the pipeline is untouched.
+STEP_COUNTER_VERSION = "1.0"
+PPG_VERSION = "1.0"
 
 SERVICE_UUID = "ABCD1234-0000-467A-9538-01F0652C74E0"
 CHAR_UUID = "ABCD1234-0001-467A-9538-01F0652C74E0"
@@ -31,6 +49,7 @@ sample_count = 0
 start_time = time.time()
 
 pipeline = MotionPipeline(SAMPLE_RATE_HZ)
+step_counter = StepCounter(sample_rate=SAMPLE_RATE_HZ)
 
 WINDOW_SIZE = SAMPLE_RATE_HZ * 4
 
@@ -54,16 +73,68 @@ writer = csv.writer(csv_file)
 
 writer.writerow([
     "timestamp",
+    "sample_timestamp_us",
+
     "ax",
     "ay",
     "az",
+
     "gx",
     "gy",
     "gz",
+
     "ir",
     "red",
+
+    "classification",
+    "tremor_score",
+    "confidence",
+    "severity",
+    "dominant_frequency",
+    "frequency_std",
+    "band_ratio",
+    "best_axis",
+    "axis_agreement",
+    "axis_dominance",
+    "rest_index",
+
+    "motion_state",
+    "motion_rms",
+
+    "steps",
+    "cadence",
+    "step_rate_hz",
+    "walking_state",
+    "distance_m",
+    "active_minutes",
+    "step_confidence",
+    "walking_confidence",
+    "activity_type",
+
+    "heart_rate",
+    "spo2",
+    "hr_confidence",
+    "spo2_confidence",
+    "signal_quality",
+    "sensor_status",
+    "finger_detected",
+
+    "rmssd",
+    "sdnn",
+    "mean_rr",
+    "pnn50",
+
+    "sample_count",
+    "packet_count",
+    "sampling_rate",
+
     "packet_version",
-    "flags"
+    "flags",
+
+    "pipeline_version",
+    "firmware_version",
+    "step_counter_version",
+    "ppg_version"
 ])
 
 def notification_handler(sender, data):
@@ -130,20 +201,6 @@ def notification_handler(sender, data):
         gy = gy_raw / 131.0
         gz = gz_raw / 131.0
 
-        writer.writerow([
-            timestamp_us,
-            ax,
-            ay,
-            az,
-            gx,
-            gy,
-            gz,
-            ir_raw,
-            red_raw,
-            version,
-            flags
-        ])
-
         ax_buffer.append(ax)
         ay_buffer.append(ay)
         az_buffer.append(az)
@@ -170,6 +227,18 @@ def notification_handler(sender, data):
                 analysis = result["result"]
                 context  = result["context"]
                 ppg      = result["ppg"]
+
+                # StepCounter is intentionally a sibling of MotionPipeline,
+                # not something MotionPipeline calls internally. It gets
+                # fed the same per-sample accel values, gated by the
+                # motion_state MotionPipeline already computed, so a
+                # tremor-only, stationary wrist never registers as steps.
+                step_data = step_counter.update(
+                    ax,
+                    ay,
+                    az,
+                    context["state"],
+                )
 
                 metrics = {
                     # ===============================
@@ -220,6 +289,25 @@ def notification_handler(sender, data):
                         3
                     ),
                     # ===============================
+                    # Steps
+                    # ===============================
+                    "steps": step_data["steps"],
+                    "cadence": step_data["cadence"],
+                    "step_rate_hz": step_data["step_rate_hz"],
+                    # Canonical activity-state field. The dashboard and
+                    # CSV both key off this single string rather than
+                    # keeping a separate boolean in sync alongside it.
+                    "walking_state": (
+                        "WALKING"
+                        if step_data["walking"]
+                        else "NOT_WALKING"
+                    ),
+                    "distance_m": step_data["distance_m"],
+                    "active_minutes": step_data["active_minutes"],
+                    "step_confidence": step_data["step_confidence"],
+                    "walking_confidence": step_data["walking_confidence"],
+                    "activity_type": step_data["activity_type"],
+                    # ===============================
                     # Heart Rate
                     # ===============================
                     "heart_rate": ppg.get("heart_rate"),
@@ -265,11 +353,86 @@ def notification_handler(sender, data):
                     "packet_version": version,
                     "flags": flags,
                     "timestamp": ppg.get("timestamp"),
-                    "motion_pipeline_state": context["state"]
+                    "motion_pipeline_state": context["state"],
+                    # ===============================
+                    # Versioning / Provenance
+                    # ===============================
+                    "pipeline_version": PIPELINE_VERSION,
+                    "firmware_version": FIRMWARE_VERSION,
+                    "step_counter_version": STEP_COUNTER_VERSION,
+                    "ppg_version": PPG_VERSION
                 }
 
                 with open(METRICS_FILE, "w") as f:
                     json.dump(metrics, f, indent=2)
+
+                writer.writerow([
+                    metrics["timestamp"],
+                    timestamp_us,
+
+                    ax,
+                    ay,
+                    az,
+
+                    gx,
+                    gy,
+                    gz,
+
+                    ir_raw,
+                    red_raw,
+
+                    metrics["classification"],
+                    metrics["tremor_score"],
+                    metrics["confidence"],
+                    metrics["severity"],
+                    metrics["dominant_frequency"],
+                    metrics["frequency_std"],
+                    metrics["band_ratio"],
+                    metrics["best_axis"],
+                    metrics["axis_agreement"],
+                    metrics["axis_dominance"],
+                    metrics["rest_index"],
+
+                    metrics["motion_state"],
+                    metrics["motion_rms"],
+
+                    metrics["steps"],
+                    metrics["cadence"],
+                    metrics["step_rate_hz"],
+                    metrics["walking_state"],
+                    metrics["distance_m"],
+                    metrics["active_minutes"],
+                    metrics["step_confidence"],
+                    metrics["walking_confidence"],
+                    metrics["activity_type"],
+
+                    metrics["heart_rate"],
+                    metrics["spo2"],
+                    ppg.get("hr_confidence"),
+                    metrics["spo2_confidence"],
+                    metrics["signal_quality"],
+                    metrics["sensor_status"],
+                    metrics["finger_detected"],
+
+                    metrics["rmssd"],
+                    metrics["sdnn"],
+                    metrics["mean_rr"],
+                    metrics["pnn50"],
+
+                    metrics["sample_count"],
+                    metrics["packet_count"],
+                    metrics["sampling_rate"],
+
+                    metrics["packet_version"],
+                    metrics["flags"],
+
+                    metrics["pipeline_version"],
+                    metrics["firmware_version"],
+                    metrics["step_counter_version"],
+                    metrics["ppg_version"]
+                ])
+
+                csv_file.flush()
 
                 print("\n============= PARKINSENSE =============")
                 print(f"Tremor        : {metrics['classification']}")
@@ -277,6 +440,10 @@ def notification_handler(sender, data):
                 print(f"Severity      : {metrics['severity']}")
                 print(f"Frequency     : {metrics['dominant_frequency']} Hz")
                 print(f"Motion        : {metrics['motion_state']}")
+                print(f"Steps         : {metrics['steps']} (cadence {metrics['cadence']} spm / {metrics['step_rate_hz']} Hz)")
+                print(f"Walking       : {metrics['walking_state']}")
+                print(f"Distance      : {metrics['distance_m']} m")
+                print(f"Active Mins   : {metrics['active_minutes']}")
                 print("--------------------------------------")
                 print(f"Heart Rate    : {metrics['heart_rate']} BPM")
                 print(f"SpO2          : {metrics['spo2']} %")
@@ -291,8 +458,6 @@ def notification_handler(sender, data):
                 print("======================================\n")
 
         offset += sample_size
-
-    csv_file.flush()
 
     if packet_count % 10 == 0:
         elapsed = (
