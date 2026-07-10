@@ -6,7 +6,6 @@
 ![Platform](https://img.shields.io/badge/Platform-XIAO%20nRF52840%20Sense-blue)
 ![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20IMU%20%2B%20MAX30102-red)
 ![BLE](https://img.shields.io/badge/BLE-104Hz%20Streaming-success)
-![Pipeline](https://img.shields.io/badge/Pipeline-V2.5-brightgreen)
 ![PPG](https://img.shields.io/badge/PPG-HR%20%7C%20HRV%20%7C%20SpO₂-blueviolet)
 ![Activity](https://img.shields.io/badge/Activity-Steps%20%7C%20Cadence%20%7C%20Distance-yellow)
 ![Dashboard](https://img.shields.io/badge/Dashboard-Live%20Plotly-orange)
