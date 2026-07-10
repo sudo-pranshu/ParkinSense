@@ -8,11 +8,12 @@
 ![BLE](https://img.shields.io/badge/BLE-104Hz%20Streaming-success)
 ![Pipeline](https://img.shields.io/badge/Pipeline-V2.5-brightgreen)
 ![PPG](https://img.shields.io/badge/PPG-HR%20%7C%20HRV%20%7C%20SpO₂-blueviolet)
+![Activity](https://img.shields.io/badge/Activity-Steps%20%7C%20Cadence%20%7C%20Distance-yellow)
 ![Dashboard](https://img.shields.io/badge/Dashboard-Live%20Plotly-orange)
 
 ### Continuous Neurological Monitoring & Digital Biomarker Platform
 
-*A wearable sensing platform for continuous Parkinson's disease monitoring using inertial sensing, physiological sensing, digital biomarkers, and real-time analytics.*
+*A wearable sensing platform for continuous Parkinson's disease monitoring using inertial sensing, physiological sensing, activity tracking, and real-time analytics.*
 
 </div>
 
@@ -29,6 +30,7 @@
 - [BLE Protocol](#-ble-protocol)
 - [Signal Processing Pipeline](#-signal-processing-pipeline)
 - [Physiological Monitoring](#-physiological-monitoring)
+- [Activity Monitoring](#-activity-monitoring)
 - [Digital Biomarkers](#-digital-biomarkers)
 - [Dashboard](#-dashboard)
 - [Repository Structure](#-repository-structure)
@@ -45,9 +47,19 @@
 
 ParkinSense is an open-source wearable research platform designed for **continuous neurological monitoring** of Parkinson's disease using wrist-worn sensors.
 
-Instead of relying solely on periodic clinical assessments, ParkinSense continuously measures motion and physiological signals throughout everyday activities. The platform combines inertial sensing, optical sensing, digital signal processing, and real-time inference to generate quantitative neurological and physiological biomarkers.
+Instead of relying solely on periodic clinical assessments, ParkinSense continuously measures motion and physiological signals throughout everyday activities. The platform combines inertial sensing, optical sensing, digital signal processing, and real-time inference to generate quantitative neurological, physiological, and activity biomarkers.
 
-The project has evolved into a dual-pipeline wearable platform inspired by modern health wearables such as WHOOP, combining a mature multi-axis tremor-detection pipeline with a full PPG-based cardiac pipeline — heart rate, RR intervals, HRV, and SpO₂ — while remaining focused on Parkinsonian symptom monitoring and biomedical signal analysis.
+The project now runs **three parallel processing pipelines** from the same sensor stream:
+
+- **Motion Processing Pipeline** — tremor detection and neurological biomarkers
+- **PPG Processing Pipeline** — heart rate, RR intervals, HRV, and SpO₂ estimation
+- **Step Tracking Pipeline** — step count, cadence, distance, and active-minute tracking
+
+The PPG pipeline currently provides heart rate, RR intervals, heart rate variability (RMSSD, SDNN, Mean RR, pNN50), a SpO₂ estimate, signal quality scoring, finger detection, and sensor status classification. These are research-grade estimates intended for signal-processing development and are **not** medical-grade or clinically validated measurements.
+
+The step tracking pipeline is a from-scratch accelerometer-based pedestrian step detector — not a repackaged third-party library — built around an adaptive threshold, motion-state gating (so tremor or handling can't be miscounted as steps), and bout-based active-minute accounting.
+
+<br>
 
 **Current sensing capabilities:**
 
@@ -60,6 +72,10 @@ The project has evolved into a dual-pipeline wearable platform inspired by moder
 | 🏃 | Motion-context aware inference |
 | ❤️ | Heart rate, RR intervals & HRV |
 | 🫁 | SpO₂ estimation |
+| 👣 | Step counting & cadence estimation |
+| 📏 | Distance estimation |
+| ⏱ | Active minute tracking |
+| 🚶 | Walking detection |
 | 📊 | Digital biomarker extraction |
 
 <br>
@@ -94,10 +110,27 @@ The project has evolved into a dual-pipeline wearable platform inspired by moder
 - Recovery score
 - Sleep analytics
 
+### Activity Monitoring
+- Real-time step counting from accelerometer magnitude
+- High-pass filtering to remove gravity / slow drift
+- Adaptive, self-tuning detection threshold (rolling mean + k·σ)
+- Hysteresis-based peak detection (no double-counting per step)
+- Refractory period gating implausibly fast "steps"
+- Motion-state gated detection (tremor/handling can't register as steps)
+- Multi-step walking confirmation before declaring "walking"
+- EMA-smoothed cadence (steps/min and step-rate in Hz)
+- Distance estimation from configurable step length
+- Bout-based active-minute accounting (sustained + cadence-qualified)
+- Per-step confidence and walking-regularity confidence heuristics
+
+**Upcoming:**
+- Activity type classification (walk vs. run vs. climb)
+- Floors climbed, calorie estimation, VO₂ max
+
 ### Software Platform
-- Modular V2 signal-processing pipeline (motion + PPG)
-- Unified runtime combining both pipelines
-- Live Plotly Dash dashboard with physiological panels
+- Modular V2 signal-processing pipeline (motion + PPG + activity)
+- Unified runtime combining all three pipelines
+- Live Plotly Dash dashboard with physiological and activity panels
 - Offline dataset recorder
 - Realtime CSV logging
 - JSON metrics export
@@ -133,7 +166,7 @@ Development branch used during the redesign of the signal-processing architectur
 | Runtime | Legacy | Runtime V2 |
 
 ### `develop` 🔧 *current*
-Adds complete physiological sensing to the wearable platform. This work landed directly on `develop` rather than a separate feature branch.
+Adds physiological sensing and activity tracking to the wearable platform. This work landed directly on `develop` rather than a separate feature branch.
 
 **Completed:**
 - MAX30102 integration
@@ -146,12 +179,16 @@ Adds complete physiological sensing to the wearable platform. This work landed d
 - Heart rate variability (RMSSD, SDNN, Mean RR, pNN50)
 - SpO₂ estimation with signal-lock state machine
 - Motion-aware HR confidence fusion
-- Unified runtime merging motion + PPG pipelines
-- Updated dashboard with live physiological panels
+- Step Tracking Pipeline (`StepCounter`)
+- Cadence estimation, distance estimation, walking detection
+- Bout-based active-minute accounting
+- Unified runtime merging motion + PPG + activity pipelines
+- Updated dashboard with live physiological and activity panels
 
 **Upcoming:**
 - Recovery metrics
 - Sleep analytics
+- Activity type classification
 
 <br>
 
@@ -173,25 +210,30 @@ Adds complete physiological sensing to the wearable platform. This work landed d
                            ▼
                     Runtime V2
                            │
-        ┌──────────────────┴──────────────────┐
-        │                                      │
-        ▼                                      ▼
- Motion Processing Pipeline               PPG Processing Pipeline
-        │                                      │
- Gravity · Notch · Bandpass              Finger Detection · SQI
-        │                                      │
- Feature Extraction                      Bandpass · Peak Detection
-        │                                      │
- Tremor Detection                        RR Intervals · HR · HRV
-        │                                      │
- Confidence · Temporal Validation        SpO₂ · Motion-aware Confidence
-        │                                      │
- Tremor State Machine                    EMA Stabilization
-        │                                      │
-        └──────────────────┬───────────────────┘
-                            ▼
+     ┌─────────────────────┼─────────────────────┐
+     │                     │                     │
+     ▼                     ▼                     ▼
+ Motion Pipeline      PPG Pipeline       Step Counter Pipeline
+     │                     │                     │
+ Gravity · Notch ·    Finger Detection ·   High-pass · Adaptive
+ Bandpass             SQI                  Threshold
+     │                     │                     │
+ Feature Extraction   Bandpass · Peak     Peak Detection ·
+                       Detection           Hysteresis
+     │                     │                     │
+ Tremor Detection     RR Intervals ·      Cadence · Distance ·
+                       HR · HRV            Active Minutes
+     │                     │                     │
+ Confidence ·          SpO₂ · Motion-      Step / Walking
+ Temporal Validation   aware Confidence    Confidence
+     │                     │                     │
+ Tremor State          EMA Stabilization   Walking Confirmation
+ Machine
+     │                     │                     │
+     └─────────────────────┴─────────────────────┘
+                           ▼
                   Digital Biomarkers
-                            │
+                           │
               ┌─────────────┴─────────────┐
               ▼                           ▼
        CSV / JSON Logging          Plotly Dash Dashboard
@@ -226,6 +268,7 @@ Adds complete physiological sensing to the wearable platform. This work landed d
 | Packet Size | 248 Bytes |
 | Motion Analysis Window | 4 seconds |
 | PPG Analysis Window | 10 seconds (rolling) |
+| Step Detector Adaptive Window | ~2 seconds |
 | Runtime | Continuous |
 
 <br>
@@ -288,13 +331,13 @@ Each BLE notification contains one complete sensor packet.
 | IR | uint32 |
 | RED | uint32 |
 
-> The versioned packet format allows future additions while maintaining backward compatibility between firmware and runtime.
+> The versioned packet format allows future additions while maintaining backward compatibility between firmware and runtime. Both the PPG pipeline and the step counter run off the same decoded accelerometer stream — no additional wire format changes were required to add step tracking.
 
 <br>
 
 ## 🔬 Signal Processing Pipeline
 
-ParkinSense runs **two independent processing pipelines** from the same BLE packet stream — a motion pipeline for tremor biomarkers and a PPG pipeline for cardiac biomarkers. Each stage has a single responsibility, so algorithms can be validated, replaced, or extended without affecting the rest of the system.
+ParkinSense runs **three independent processing pipelines** from the same BLE packet stream — a motion pipeline for tremor biomarkers, a PPG pipeline for cardiac biomarkers, and a step-tracking pipeline for activity biomarkers. Each stage has a single responsibility, so algorithms can be validated, replaced, or extended without affecting the rest of the system.
 
 ```
 Raw BLE Packet
@@ -305,10 +348,10 @@ Packet Decoder
       ▼
 Rolling Buffer
       │
-      ├────────────── IMU ──────────────┐
-      │                                 │
-      ▼                                 ▼
- Motion Pipeline                   PPG Pipeline
+      ├───────────── IMU ─────────────┬──────────────┐
+      │                                │              │
+      ▼                                ▼              ▼
+ Motion Pipeline                  PPG Pipeline   Step Counter Pipeline
 ```
 
 ### 🏃 Motion Pipeline
@@ -387,13 +430,56 @@ The published heart rate is smoothed with an exponential moving average, with lo
 Once enough clean RR intervals are available, RMSSD, SDNN, Mean RR, and pNN50 are computed using standard time-domain HRV definitions, each carrying its own confidence and artifact-percentage diagnostics.
 
 **SpO₂**
-A beat-by-beat ratio-of-ratios estimate (with RED/IR peak alignment validation, calibration mapping, and a SEARCHING → LOCKED → TRACKING → LOST signal-lock state machine) produces a rate-limited, confidence-weighted SpO₂ reading, published on a throttled cadence.
+A beat-by-beat ratio-of-ratios estimate (with RED/IR peak alignment validation, calibration mapping, and a SEARCHING → LOCKED → TRACKING → LOST signal-lock state machine) produces a rate-limited, confidence-weighted SpO₂ estimate, published on a throttled cadence. This is a research-grade estimate, not a clinically validated pulse-oximetry reading.
 
 **Motion-aware Confidence**
 Overall HR confidence is discounted according to the Motion Pipeline's reported activity state, so a walking or running window is trusted less than a resting one without being discarded outright.
 
 **Physiological Biomarkers**
-Heart rate, RR intervals, HRV metrics, SpO₂, sensor status, and every confidence/quality sub-score are emitted for logging and the dashboard.
+Heart rate, RR intervals, HRV metrics, SpO₂, sensor status, and confidence/quality sub-scores are emitted for logging and the dashboard.
+
+<br>
+
+### 👣 Step Tracking Pipeline
+
+**Raw Accelerometer**
+The step counter runs off the same 104 Hz accelerometer stream as the motion pipeline, so no additional sensor acquisition is required.
+
+**Acceleration Magnitude**
+Each sample's three axes are combined into a single magnitude (`√(ax²+ay²+az²)`), collapsing orientation-dependent motion into one scalar signal.
+
+**High-Pass Filtering**
+A first-order high-pass filter (α = 0.95) removes gravity and slow postural drift from the magnitude signal, leaving only its oscillatory component — the part that actually reflects footstrike impacts.
+
+**Adaptive Threshold**
+A rolling ~2-second buffer of the filtered magnitude feeds a self-tuning threshold: `mean + k·σ` (k = 0.7), clamped between a floor and ceiling. This lets the same detector work for a brisk walk or a gentle stroll without hand-tuned constants per user.
+
+**Peak Detection & Hysteresis**
+Only the signed, positive-going excursion of the filtered signal triggers a step — using the absolute value would double-count each oscillation. Once triggered, the detector re-arms only after the signal drops well below the threshold (a hysteresis band), so a single step can't be counted twice as it decays.
+
+**Refractory Period**
+A minimum inter-step interval, derived from a configurable maximum cadence (200 steps/min by default), rejects any "step" arriving faster than a human could physically step — filtering high-frequency noise or bounce.
+
+**Motion-State Gating**
+Steps are only registered while the Motion Pipeline's context classifier reports genuine body movement (`active` / `walking` / `moving`). This is what prevents hand tremor, in-pocket fidgeting, or device handling from being miscounted as steps — the Motion Pipeline has already solved "is the body moving," so the step counter doesn't re-solve it.
+
+**Walking Confirmation**
+"Walking" only flips `True` after 3 consecutive steps land at a gait-consistent interval, so a single stray movement isn't reported as the start of a walk. It clears quickly via a walking-timeout once steps stop arriving.
+
+**Cadence Estimation**
+Instantaneous step-to-step intervals are smoothed with an EMA (α = 0.3) to produce a stable steps-per-minute figure, also reported in Hz for gait-analysis contexts that prefer that unit.
+
+**Distance Estimation**
+Distance accumulates as `step_count × step_length_m`, where step length is a constructor parameter (not a hardcoded constant) so it can later be calibrated per user — e.g. from height — without touching detection logic.
+
+**Active-Minute Accounting**
+Deliberately stricter than "walking": a bout only starts accruing active minutes once it has been sustained continuously for a minimum duration *and* cadence exceeds a minimum threshold. This keeps a short walk to the kitchen from padding activity totals the way a real activity bout would.
+
+**Confidence Heuristics**
+Two independent 0–1 heuristics are computed: step confidence, from how far the triggering peak cleared the adaptive threshold (margin ratio); and walking confidence, from the coefficient of variation of recent step intervals — a steady gait produces tightly clustered intervals, an irregular one doesn't.
+
+**Activity Biomarkers**
+Step count, cadence (spm and Hz), distance, walking state, active minutes, and both confidence scores are emitted for logging and the dashboard. An `activity_type` field is reserved for future walk/run/climb classification but currently reports only `"walking"` or `None`.
 
 <br>
 
@@ -411,38 +497,44 @@ Binary Packet Streaming (~104 Hz)
         ▼
 Runtime V2 — Packet Decoding
         │
-        ├─────────────────────────────┐
-        ▼                             ▼
- Motion Pipeline                PPG Pipeline
- (Gravity → Notch → Bandpass    (Finger Detection → SQI → Bandpass
-  → Motion Context → Features    → Peak Detection → RR → HR → EMA
-  → Tremor Detection →           → HRV → SpO₂ → Motion-aware
-  Confidence → Temporal           Confidence)
-  Validation → State Machine)
-        │                             │
-        └─────────────┬───────────────┘
-                       ▼
+        ├─────────────────┬─────────────────────┐
+        ▼                 ▼                     ▼
+ Motion Pipeline     PPG Pipeline        Step Counter Pipeline
+ (Gravity → Notch    (Finger Detection   (High-pass → Adaptive
+  → Bandpass →        → SQI → Bandpass    Threshold → Peak
+  Motion Context →     → Peak Detection   Detection → Cadence
+  Features →           → RR → HR → EMA    → Distance → Active
+  Tremor Detection →   → HRV → SpO₂ →     Minutes → Confidence)
+  Confidence →          Motion-aware
+  Temporal              Confidence)
+  Validation →
+  State Machine)
+        │                 │                     │
+        └─────────────────┴─────────────────────┘
+                           ▼
              Digital Biomarker Fusion
-                       │
-        ┌──────────────┴──────────────┐
-        ▼                             ▼
- Realtime CSV Logging          JSON Metrics Export
-        │                             │
-        └──────────────┬──────────────┘
-                        ▼
-             Plotly Dash Dashboard
-                        │
-                        ▼
-              Offline Replay & Analysis
+                           │
+        ┌──────────────────┴──────────────────┐
+        ▼                                      ▼
+ Realtime CSV Logging                  JSON Metrics Export
+        │                                      │
+        └──────────────────┬───────────────────┘
+                            ▼
+                 Plotly Dash Dashboard
+                            │
+                            ▼
+                Offline Replay & Analysis
 ```
 
 <br>
 
 ## ❤️ Physiological Monitoring
 
-ParkinSense includes a complete optical sensing subsystem built around the MAX30102, producing cardiac biomarkers alongside the motion pipeline's tremor biomarkers.
+ParkinSense includes an optical sensing subsystem built around the MAX30102, producing cardiac biomarkers alongside the motion pipeline's tremor biomarkers.
 
 **Current functionality:** IR/RED acquisition · finger detection with hysteresis · signal quality estimation · sensor status classification · adaptive peak detection · RR interval extraction · heart rate estimation · EMA stabilization · heart rate variability (RMSSD, SDNN, Mean RR, pNN50) · SpO₂ estimation · motion-aware confidence fusion · BLE transmission · runtime decoding · dashboard visualization
+
+All of the above are research-grade signal-processing estimates, intended for algorithm development and validation rather than clinical use.
 
 ### PPG Fusion Module
 The PPG Fusion layer (`PPGProcessor`) acts as the stateful interface between the optical sensor and the analytics pipeline, maintaining rolling buffers, EMA smoothing state, finger-presence hysteresis, and SpO₂ publish throttling across calls.
@@ -450,6 +542,18 @@ The PPG Fusion layer (`PPGProcessor`) acts as the stateful interface between the
 **Current:** IR validation · RED validation · finger detection · sensor availability · signal quality · heart rate · RR intervals · HRV · SpO₂ · motion-aware confidence fusion
 
 **Future:** Respiratory rate · recovery metrics
+
+<br>
+
+## 👣 Activity Monitoring
+
+The activity subsystem continuously analyzes wrist accelerometer data to estimate daily activity metrics alongside neurological and physiological biomarkers, using the standalone `StepCounter` module.
+
+**Current capabilities:** Step count · cadence (steps/min and Hz) · distance estimate · walking detection · active-minute tracking · step confidence · walking-regularity confidence
+
+The detector is motion-state gated by the Motion Pipeline's classifier, so tremor and incidental device handling are rejected rather than miscounted as steps. `reset()` clears session totals (steps, distance, active minutes) without discarding calibration, so it can be called on BLE reconnect or a future "start workout" action without recreating the object.
+
+**Future:** Activity type classification (walk vs. run vs. climb) · floors climbed · calorie estimation · VO₂ max
 
 <br>
 
@@ -478,18 +582,44 @@ The PPG Fusion layer (`PPGProcessor`) acts as the stateful interface between the
 | Mean RR / pNN50 | Additional HRV time-domain metrics |
 | SpO₂ | Blood oxygen saturation estimate |
 | HR Confidence | Composite, motion-aware trust score |
+| Step Count | Cumulative detected steps |
+| Cadence | EMA-smoothed steps/min (and Hz) |
+| Distance | Estimated distance from step length |
+| Walking State | Confirmed walking flag |
+| Active Minutes | Sustained, cadence-qualified activity time |
+| Step Confidence | Peak-margin heuristic (0–1) |
+| Walking Confidence | Step-interval regularity heuristic (0–1) |
 
-*Future:* Recovery Score · Sleep Quality · Bradykinesia Index · Dyskinesia Index · Medication Response · Longitudinal Symptom Burden
+*Future:* Recovery Score · Sleep Quality · Bradykinesia Index · Dyskinesia Index · Medication Response · Activity Type Classification · Longitudinal Symptom Burden
 
 <br>
 
 ## 📺 Dashboard
 
-The dashboard provides real-time visualization of all computed biomarkers, refreshing automatically every 100 ms while remaining synchronized with the runtime metrics.
+The dashboard (`realtime_dashboard_v2.py`) is a dark-themed Plotly Dash app that polls `realtime_metrics_v2.json` and `realtime_capture_v2.csv` on a 100 ms `dcc.Interval` tick and re-renders in place.
 
-**Current components:** Live Gyroscope · Tremor Score Gauge · Motion State · Confidence · Severity · Tremor Burden · Dominant Frequency · Band Ratio · IR Signal · RED Signal · Finger Detection · Axis Information · **Heart Rate** · **HRV (RMSSD/SDNN/Mean RR/pNN50)** · **SpO₂** · **Signal Quality / Sensor Status**
+**Layout**
 
-**Coming soon:** Recovery · Sleep Analytics · Battery Status
+Metric cards are grouped into three labeled sections, each rendered as its own row of cards:
+
+- **Parkinson's** — Status, Tremor Score, Frequency, Severity, Burden, Confidence, Motion, Rest Index, Best Axis, Band Ratio
+- **Activity** — Steps, Cadence, Distance (converted to km), Walking, Active Minutes
+- **Vitals** — Heart Rate, SpO₂, Finger
+
+Cards are simple title/value tiles; boolean- or state-like values (`TREMOR` / `NO TREMOR`, `YES` / `NO`, `WAITING`) are color-coded — green for a clear/positive state, red for a flagged one, grey while waiting for data — so status is readable at a glance without reading the number.
+
+Below the cards sit four live graphs:
+
+- **Live Gyroscope** — GX/GY/GZ traces
+- **Tremor Score Gauge** — a 0–100 gauge indicator with green/yellow/orange/red zones
+- **Heart Rate & SpO₂** — dual-axis line trend (HR on the primary axis, SpO₂ pinned to an 80–100% secondary axis)
+- **Cadence Trend** — a filled area trace of steps/min
+
+The three trend graphs (gyroscope, vitals, cadence) show a rolling **60-second** window, computed from the on-device `sample_timestamp_us` column rather than a fixed row count — so "last 60 seconds" means the same span regardless of the streaming rate, falling back to the last 400 rows if no timestamp column is present.
+
+**Not yet on the dashboard:** the PPG pipeline computes HRV (RMSSD/SDNN/Mean RR/pNN50), Signal Quality (SQI), and Sensor Status, and the firmware streams raw IR/RED — all of this is logged to CSV/JSON today, but none of it has a card or graph in the current dashboard build.
+
+**Coming soon:** Recovery · Sleep Analytics · Battery Status · Activity Type · HRV, SQI, Sensor Status, and IR/RED visualization
 
 <br>
 
@@ -502,6 +632,8 @@ ParkinSense
 │
 ├── dashboard/
 │   └── python/
+│       ├── activity/
+│       │   └── step_counter.py
 │       ├── analytics/
 │       ├── calibration/
 │       ├── context/
@@ -534,7 +666,7 @@ The repository is intentionally modular to support rapid algorithm development w
 
 ## 🚀 Getting Started
 
-This guide walks through setting up the complete ParkinSense platform, from flashing the wearable firmware to visualizing live neurological and physiological biomarkers.
+This guide walks through setting up the complete ParkinSense platform, from flashing the wearable firmware to visualizing live neurological, physiological, and activity biomarkers.
 
 ### Requirements
 
@@ -637,7 +769,7 @@ Open **http://127.0.0.1:8050** — the dashboard updates continuously while the 
 
 ```
 Flash Firmware → Power Wearable → BLE Advertising → Runtime V2
-       → Packet Decoder → Motion Pipeline + PPG Pipeline
+       → Packet Decoder → Motion Pipeline + PPG Pipeline + Step Counter Pipeline
        → Digital Biomarkers → CSV/JSON Logging → Dashboard
 ```
 
@@ -646,6 +778,7 @@ Flash Firmware → Power Wearable → BLE Advertising → Runtime V2
 ```
 ========== PARKINSENSE V2 ==========
 
+Motion
 State          : NO TREMOR
 Score          : 14 / 100
 Confidence     : 96 %
@@ -653,8 +786,17 @@ Frequency      : 5.18 Hz
 Severity       : NONE
 Motion         : REST
 Best Axis      : GY
-
 -------------------------------------
+
+Activity
+Steps          : 482
+Cadence        : 108.4 spm
+Distance       : 361.5 m
+Walking        : NO
+Active Minutes : 6.2
+-------------------------------------
+
+Vitals
 Heart Rate     : 71.4 BPM
 SpO2           : 97.8 %
 Signal Quality : 68.2
@@ -667,11 +809,16 @@ Mean RR        : 840.0 ms
 pNN50          : 12.5 %
 -------------------------------------
 
+Raw
 IR             : 91243
 RED            : 61871
 
 =====================================
 ```
+
+### CSV Logger
+
+Every processed sample is logged to `realtime_capture_v2.csv` for offline replay, validation, and future ML dataset generation. Logged fields include: timestamp, raw accelerometer and gyroscope samples, IR/RED, heart rate, RR intervals, RMSSD, SDNN, Mean RR, pNN50, SpO₂, SQI, sensor status, motion state, tremor score, step count, cadence, distance, walking flag, active minutes, and step/walking confidence.
 
 ### Troubleshooting
 
@@ -684,6 +831,9 @@ RED            : 61871
 | Finger always NO | Place finger completely over sensor |
 | Heart Rate stuck near None | Hold still for the full 10 s buffer to fill; check Signal Quality/Sensor Status |
 | HRV always None | Needs several consecutive clean RR intervals — improve finger contact/stillness |
+| Steps not incrementing | Confirm Motion Pipeline is reporting `active`/`walking`/`moving`, not `REST` |
+| Walking never turns YES | Requires 3 consecutive steps at a consistent gait interval — try a longer, steadier walk |
+| Active Minutes stuck at 0 | Bout must sustain past the minimum duration and cadence threshold — brief walks won't qualify |
 | Runtime crashes | Confirm Python dependencies are installed |
 | BLE disconnects | Restart runtime and reconnect |
 
@@ -698,13 +848,14 @@ RED            : 61871
 | BLE Streaming | ~104 Hz |
 | Motion Analysis Window | 4 s |
 | PPG Analysis Window | 10 s (rolling) |
+| Step Detector Adaptive Window | ~2 s (rolling) |
 | SpO₂ Publish Cadence | ~10 s (throttled) |
 | Packet Size | 248 Bytes |
 | Runtime Latency | <100 ms after analysis window |
 | Dashboard Refresh | 100 ms |
 | Runtime | Continuous |
 
-The current implementation supports simultaneous IMU and optical streaming, running both the motion and PPG pipelines every cycle, while maintaining stable BLE throughput.
+The current implementation supports simultaneous IMU and optical streaming, running the motion, PPG, and step-counter pipelines every cycle, while maintaining stable BLE throughput and continuous CSV logging.
 
 <br>
 
@@ -739,7 +890,18 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - [x] SpO₂
 - [x] Motion-aware HR Confidence
 
-**Phase 4 — Digital Biomarkers**
+**Phase 4 — Activity Monitoring**
+- [x] Step Counter
+- [x] Cadence Estimation
+- [x] Distance Estimation
+- [x] Walking Detection
+- [x] Active Minute Accounting
+- [ ] Activity Type Classification
+- [ ] Floors Climbed
+- [ ] Calorie Estimation
+- [ ] VO₂ Max
+
+**Phase 5 — Digital Biomarkers**
 - [x] Tremor Frequency
 - [x] Tremor Score
 - [x] Confidence
@@ -747,11 +909,12 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - [x] Tremor Burden
 - [x] Rest Index
 - [x] Heart Rate / HRV / SpO₂ Biomarkers
+- [x] Step / Cadence / Distance / Active Minute Biomarkers
 
-**Phase 5 — Wearable Platform**
+**Phase 6 — Wearable Platform**
 - [x] Rechargeable Li-ion Operation
 - [x] Live Dashboard
-- [x] Runtime V2 (Unified Motion + PPG)
+- [x] Runtime V2 (Unified Motion + PPG + Activity)
 - [x] BLE Packet Versioning
 - [x] Realtime CSV Logging
 - [x] JSON Metrics Export
@@ -759,7 +922,7 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - [ ] Power Optimization
 - [ ] Mobile Companion App
 
-**Phase 6 — Machine Learning**
+**Phase 7 — Machine Learning**
 - [ ] Adaptive Thresholds
 - [ ] Personalized Models
 - [ ] Activity Recognition
@@ -777,8 +940,24 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - Continuous disease tracking
 - Motion artifact rejection
 - Physiological signal fusion
+- Human activity recognition
 - Biomedical signal processing
 - Edge AI for wearables
+
+<br>
+
+## 🚀 Future Wearable Features
+
+- Activity type classification (walk / run / climb)
+- Sleep detection
+- Recovery score
+- Respiratory rate
+- Battery monitoring
+- Mobile companion app
+- Cloud synchronization
+- Longitudinal analytics
+- Personalized models
+- Digital therapeutics
 
 <br>
 
@@ -800,7 +979,7 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 
 ParkinSense is an open-source research platform intended for educational and experimental purposes.
 
-It is **not** a certified medical device and must not be used for diagnosis, treatment, or clinical decision-making. All outputs, including tremor detection, confidence scores, physiological metrics, and digital biomarkers, are intended solely for research and development.
+It is **not** a certified medical device and must not be used for diagnosis, treatment, or clinical decision-making. All outputs, including tremor detection, confidence scores, physiological metrics, activity metrics, and digital biomarkers, are intended solely for research and development.
 
 Clinical validation with appropriately labeled datasets is required before any medical application.
 
