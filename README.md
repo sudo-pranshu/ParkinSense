@@ -10,6 +10,8 @@
 ![PPG](https://img.shields.io/badge/PPG-HR%20%7C%20HRV%20%7C%20SpO₂-blueviolet)
 ![Activity](https://img.shields.io/badge/Activity-Steps%20%7C%20Cadence%20%7C%20Distance-yellow)
 ![Dashboard](https://img.shields.io/badge/Dashboard-Live%20Plotly-orange)
+![Android](https://img.shields.io/badge/Android-Companion%20App-3DDC84)
+![Firmware](https://img.shields.io/badge/Firmware-v3%20Dev%20%7C%20v4%20Power--Optimized-lightgrey)
 
 ### Continuous Neurological Monitoring & Digital Biomarker Platform
 
@@ -23,23 +25,29 @@
 
 - [Overview](#-overview)
 - [Why ParkinSense?](#-why-parkinsense)
+- [Why Another Parkinson's Wearable?](#-why-another-parkinsons-wearable)
 - [Core Features](#-core-features)
 - [Development Branches](#-development-branches)
 - [System Architecture](#-system-architecture)
 - [Design Principles](#-design-principles)
 - [Hardware Platform](#-hardware-platform)
 - [Firmware](#-firmware)
+- [Battery Optimization](#-battery-optimization)
 - [BLE Protocol](#-ble-protocol)
 - [Signal Processing Pipeline](#-signal-processing-pipeline)
 - [Physiological Monitoring](#-physiological-monitoring)
 - [Activity Monitoring](#-activity-monitoring)
 - [Digital Biomarkers](#-digital-biomarkers)
 - [Dashboard](#-dashboard)
+- [Android Companion Application](#-android-companion-application)
 - [Repository Structure](#-repository-structure)
+- [Wearable Platform](#-wearable-platform)
+- [App Screenshots](#-app-screenshots)
 - [Getting Started](#-getting-started)
 - [Performance](#-performance)
-- [Development Roadmap](#-development-roadmap)
+- [Development Roadmap](#%EF%B8%8F-development-roadmap)
 - [Research Focus](#-research-focus)
+- [Future Wearable Features](#-future-wearable-features)
 - [Citation](#-citation)
 - [Disclaimer](#%EF%B8%8F-disclaimer)
 
@@ -85,6 +93,22 @@ ParkinSense was built to explore how modern wearable architectures can be applie
 | ⏱ | Active minute tracking |
 | 🚶 | Walking detection |
 | 📊 | Digital biomarker extraction |
+
+<br>
+
+## 🌐 Why Another Parkinson's Wearable?
+
+Most wearable projects targeting Parkinson's disease tremor stop at a single sensing channel — typically inertial tremor quantification, often processed offline once the recording session has ended. ParkinSense takes a different approach: rather than isolating one channel, it integrates motion sensing, PPG (cardiac) sensing, activity tracking, BLE streaming, a live dashboard, a native Android companion app, a Python reference runtime, dataset generation, and ongoing research into one platform.
+
+Concretely, this means:
+
+- **Motion + Cardiac + Activity** biomarkers come from a single synchronized sensor stream, not three separate tools bolted together
+- **Real-time, on-device processing** across all three pipelines, rather than an offline post-processing step
+- **Cross-pipeline gating** — the same motion-context classification that flags tremor is reused to gate the step counter (rejecting tremor/handling artifacts) and to discount PPG confidence during movement, instead of each channel re-deriving its own notion of "is the body moving"
+- **Two access paths** — a Python reference stack for research and algorithm development, and a native Android app for standalone, Python-free deployment
+- **A documented, replicable architecture** — filter orders, window lengths, state-machine transitions, and confidence heuristics are described in enough detail to be reproduced or extended
+
+This is an architectural comparison — an integrated, multi-modal platform versus a single-channel tool — not a performance claim. ParkinSense has not yet undergone the kind of clinical validation that some single-modality tremor wearables have already completed, and every metric it reports is explicitly labeled research-grade pending that validation (see [Disclaimer](#%EF%B8%8F-disclaimer)).
 
 <br>
 
@@ -139,6 +163,8 @@ ParkinSense was built to explore how modern wearable architectures can be applie
 - Modular V2 signal-processing pipeline (motion + PPG + activity)
 - Unified runtime combining all three pipelines
 - Live Plotly Dash dashboard with physiological and activity panels
+- Native Android companion app with its own live dashboard, recording, replay, and export
+- Two power-optimized firmware variants (v3 development / v4 power-optimized)
 - Offline dataset recorder
 - Realtime CSV logging
 - JSON metrics export
@@ -192,11 +218,24 @@ Adds physiological sensing and activity tracking to the wearable platform. This 
 - Bout-based active-minute accounting
 - Unified runtime merging motion + PPG + activity pipelines
 - Updated dashboard with live physiological and activity panels
+- v4 power-optimized firmware (deep sleep, automatic wake, BLE scheduling optimization)
+- Native Android companion application (BLE, processing, dashboard, recording, replay, export)
 
 **Upcoming:**
 - Recovery metrics
 - Sleep analytics
 - Activity type classification
+
+### Platform Components at a Glance
+
+| Component | Used For |
+|---|---|
+| `main` | Stable, validated V2 neurological monitoring platform |
+| `develop` | Active development branch — physiological + activity sensing, current work |
+| **v3 Firmware** | General development — maximum debugging, serial logging, algorithm tuning, feature implementation |
+| **v4 Firmware** | Power-optimized firmware for continuous wearable deployment — builds on v3, adds deep sleep and BLE scheduling optimization |
+| **Python Runtime** | Reference signal-processing stack — algorithm development, dataset generation, Plotly dashboard |
+| **Android App** | Native mobile companion — BLE, on-device processing, dashboard, session recording, replay, export |
 
 <br>
 
@@ -245,6 +284,7 @@ Adds physiological sensing and activity tracking to the wearable platform. This 
               ┌─────────────┴─────────────┐
               ▼                           ▼
        CSV / JSON Logging          Plotly Dash Dashboard
+                                    Android App Dashboard
 ```
 
 <br>
@@ -320,7 +360,59 @@ The wearable firmware is built around a modular architecture separating sensing,
 
 The firmware supports simultaneous inertial and optical acquisition without affecting BLE throughput.
 
+Firmware now ships in two variants — **v3** for development and **v4** for power-optimized wearable deployment — sharing the same core sensing and packet-generation logic. See [Battery Optimization](#-battery-optimization) below for details.
+
 **Location:** `firmware/xiao_nrf52840/`
+
+<br>
+
+## 🔋 Battery Optimization
+
+ParkinSense ships two firmware variants built on the same core sensing and BLE stack, differing in how aggressively they manage power.
+
+### Firmware Variants
+
+| | v3 Firmware | v4 Firmware |
+|---|---|---|
+| Purpose | General development | Power-optimized wearable deployment |
+| Debugging | Maximum — serial logging, verbose output | Debug-gated, minimal overhead |
+| Recommended for | Development, debugging, algorithm testing, feature implementation | Continuous, all-day wearable operation |
+| Power behavior | Not power-optimized | Deep sleep, optimized BLE scheduling, reduced processing overhead |
+
+**v3 Firmware** is the general-purpose development build. It prioritizes visibility over efficiency — maximum debugging, serial logging, and easier iteration — making it the right choice while implementing features, tuning algorithms, or validating new pipeline changes.
+
+**v4 Firmware** builds directly on v3 and adds the power-optimization layer required for actual wearable deployment: reduced MCU wake time, optimized BLE scheduling, reduced unnecessary processing, optimized sensor handling, and improved runtime efficiency. It is the firmware built specifically for continuous wearable operation.
+
+| Mode | Firmware |
+|------|----------|
+| Development | v3 |
+| Production wearable | v4 |
+
+### Power Optimization Features
+
+**Deep Sleep**
+When the MAX30102 detects loss of skin contact, the firmware automatically stops continuous sensing, stops unnecessary processing, and enters an ultra-low-power sleep state. Current draw drops into the microamp range.
+
+**Automatic Wake-up**
+When skin contact returns, the device wakes automatically, restarts the sensors, resumes BLE, and resumes streaming — no button required.
+
+**Sensor-aware Power Management**
+The PPG pipeline already determines whether a finger is present. Rather than let this information go unused, the firmware uses it directly to control the wearable's power state, so power is only spent actively sensing while the device is actually being worn.
+
+**BLE Optimization**
+Optimized packet scheduling reduces unnecessary radio activity while still supporting continuous streaming without sacrificing battery life.
+
+### Measured Power
+
+Power was measured on the assembled wearable prototype using a **Nordic Power Profiler Kit II** — measured, not estimated from component datasheets.
+
+| State | Current |
+|-------|---------|
+| Active Streaming (sensing + BLE) | ~7 mA |
+| Deep Sleep | Microamp range |
+
+**Battery:** 3.7 V, 700 mAh Li-ion
+**Estimated runtime:** ~100 hours continuous, based on the measured ~7 mA active current.
 
 <br>
 
@@ -361,7 +453,7 @@ Each BLE notification contains one complete sensor packet.
 | IR | uint32 |
 | RED | uint32 |
 
-> The versioned packet format allows future additions while maintaining backward compatibility between firmware and runtime. Both the PPG pipeline and the step counter run off the same decoded accelerometer stream — no additional wire format changes were required to add step tracking.
+> The versioned packet format allows future additions while maintaining backward compatibility between firmware and runtime. Both the PPG pipeline and the step counter run off the same decoded accelerometer stream — no additional wire format changes were required to add step tracking. The same protocol is decoded natively by both the Python runtime and the Android app.
 
 <br>
 
@@ -551,6 +643,7 @@ Runtime V2 — Packet Decoding
         └──────────────────┬───────────────────┘
                             ▼
                  Plotly Dash Dashboard
+                    Android App Dashboard
                             │
                             ▼
                 Offline Replay & Analysis
@@ -562,7 +655,7 @@ Runtime V2 — Packet Decoding
 
 ParkinSense includes an optical sensing subsystem built around the MAX30102, producing cardiac biomarkers alongside the motion pipeline's tremor biomarkers.
 
-**Current functionality:** IR/RED acquisition · finger detection with hysteresis · signal quality estimation · sensor status classification · adaptive peak detection · RR interval extraction · heart rate estimation · EMA stabilization · heart rate variability (RMSSD, SDNN, Mean RR, pNN50) · SpO₂ estimation · motion-aware confidence fusion · BLE transmission · runtime decoding · dashboard visualization
+**Current functionality:** IR/RED acquisition · finger detection with hysteresis · signal quality estimation · sensor status classification · adaptive peak detection · RR interval extraction · heart rate estimation · EMA stabilization · heart rate variability (RMSSD, SDNN, Mean RR, pNN50) · SpO₂ estimation · motion-aware confidence fusion · BLE transmission · runtime decoding · dashboard visualization (Python and Android)
 
 All of the above are research-grade signal-processing estimates, intended for algorithm development and validation rather than clinical use.
 
@@ -647,11 +740,170 @@ Below the cards sit four live graphs:
 
 The three trend graphs (gyroscope, vitals, cadence) show a rolling **60-second** window, computed from the on-device `sample_timestamp_us` column rather than a fixed row count — so "last 60 seconds" means the same span regardless of the streaming rate, falling back to the last 400 rows if no timestamp column is present.
 
-**Not yet on the dashboard:** the PPG pipeline computes HRV (RMSSD/SDNN/Mean RR/pNN50), Signal Quality (SQI), and Sensor Status, and the firmware streams raw IR/RED — all of this is logged to CSV/JSON today, but none of it has a card or graph in the current dashboard build.
+**Not yet on the dashboard:** the PPG pipeline computes HRV (RMSSD/SDNN/Mean RR/pNN50), Signal Quality (SQI), and Sensor Status, and the firmware streams raw IR/RED — all of this is logged to CSV/JSON today, but none of it has a card or graph in the current Python dashboard build.
 
 **Coming soon:** Recovery · Sleep Analytics · Battery Status · Activity Type · HRV, SQI, Sensor Status, and IR/RED visualization
 
 **Architecture note:** the dashboard is intentionally decoupled from the processing pipelines. All computation happens inside Runtime V2; the dashboard only reads the exported `realtime_metrics_v2.json` and `realtime_capture_v2.csv` files and never imports the pipeline modules directly. This means the motion, PPG, and step-counter pipelines can be tested, replayed, or replaced without touching the UI at all.
+
+<br>
+
+## 📱 Android Companion Application
+
+ParkinSense includes a native Android application that brings the Python runtime experience directly to a mobile device. The Android application is not a simple BLE terminal — it is intended to be, and is being built toward, a complete wearable companion similar to commercial wearable ecosystems.
+
+### Purpose
+
+The app performs, entirely on-device:
+
+- BLE communication
+- Real-time decoding
+- Signal processing (motion, PPG, and step pipelines)
+- Dashboard visualization
+- Session recording
+- Data storage
+- Export
+- History
+- Session replay
+
+— without requiring Python.
+
+### Core Features
+
+| Feature | Description |
+|---|---|
+| BLE Device Discovery | Scans for and lists nearby ParkinSense wearables |
+| Auto Reconnect | Automatically restores a dropped BLE connection |
+| MTU Negotiation | Negotiates BLE MTU for full-rate packet streaming |
+| Packet Decoder | Parses the binary BLE packet format natively on-device |
+| Real-time Motion Processing | Runs the motion/tremor pipeline live |
+| Real-time PPG Processing | Runs the PPG (HR/HRV/SpO₂) pipeline live |
+| Step Counter | Runs the step-tracking pipeline live |
+| Dashboard | Live cards and charts across neurological, physiological, and activity data |
+| Recording Sessions | Captures a full session with metadata |
+| Session History | Browsable list of past recordings |
+| CSV Export | Export a session as CSV |
+| JSON Export | Export a session as JSON |
+| Replay | Re-plays a recorded session through the live rendering path |
+| Settings | App and device configuration |
+| Diagnostics | Developer-facing BLE and pipeline diagnostics |
+| Dark Mode | Full dark theme |
+
+### Dashboard
+
+The Android dashboard mirrors the grouping used in the Python dashboard, with live cards and charts organized into sections:
+
+- **Neurological** — tremor state, score, frequency, severity, burden, confidence
+- **Physiological** — heart rate, HRV, SpO₂, signal quality, sensor status
+- **Activity** — steps, cadence, distance, walking state, active minutes
+- **Connection** — BLE status, device name, signal strength
+- **Battery** *(coming soon)* — wearable battery level
+
+Live cards update in sync with the underlying pipelines, similar to the card-based layout in the Python dashboard. Live charts render with smooth, continuously updating graphs, keeping motion, PPG, and activity series visually synchronized the same way they are in the Python dashboard.
+
+### Session Recording
+
+Every recording creates a complete session, capturing:
+
+- Start time
+- End time
+- Duration
+- Firmware version
+- Device name
+- Average heart rate
+- Average SpO₂
+- Steps
+- Cadence
+- Distance
+- Tremor metrics
+- Motion metrics
+- Session notes
+
+### Session History
+
+Recorded sessions appear in history. Each session can be:
+
+- Opened
+- Reviewed
+- Exported
+- Deleted
+- Shared
+- Replayed
+
+### Session Replay
+
+Old recordings can be replayed exactly like live streaming — graphs animate and metrics update in place. Useful for algorithm validation, clinical review, debugging, and education, without needing the wearable connected.
+
+### Export
+
+Sessions can be exported with the following filters:
+
+- Current Session
+- Today
+- Yesterday
+- Last 7 Days
+- Last 30 Days
+- This Month
+- Custom Date
+- Custom Date Range
+- All Sessions
+
+**Supported formats:** CSV · JSON · ZIP
+
+Exported files include raw data, processed biomarkers, session metadata, and timestamps.
+
+### BLE Architecture
+
+The Android app's internal architecture closely mirrors the Python Runtime V2 architecture:
+
+- BLE Manager
+- Packet Decoder
+- Pipeline Dispatcher
+- Motion Pipeline
+- PPG Pipeline
+- Step Pipeline
+- Database
+- Dashboard
+- Export Manager
+
+### Reliability Features
+
+- Automatic reconnect
+- Notification recovery
+- Packet validation
+- Duplicate packet rejection
+- Buffer management
+- Connection monitoring
+- Stream recovery
+- Background recovery
+- Crash protection
+- Pipeline isolation
+
+### Diagnostics
+
+A developer diagnostics page surfaces:
+
+- RSSI
+- MTU
+- Packets/sec
+- Samples/sec
+- Packet loss
+- Decoder rate
+- Pipeline status
+- Buffer status
+- Reconnect count
+- BLE state
+
+### Future Features
+
+- Cloud Sync
+- OTA Firmware Updates
+- Battery Health
+- Recovery
+- Sleep
+- Medication Tracking
+- Clinician Portal
+- Longitudinal Analytics
 
 <br>
 
@@ -661,6 +913,20 @@ The three trend graphs (gyroscope, vitals, cadence) show a rolling **60-second**
 ParkinSense
 │
 ├── firmware/
+│   └── xiao_nrf52840/
+│       └── src/
+│           ├── parksense_wearable_v3/   # Development firmware
+│           └── parksense_wearable_v4/   # Power-optimized wearable firmware
+│
+├── Android/
+│   └── app/                              # Native Android companion app
+│       ├── ble/                          # BLE Manager, discovery, auto-reconnect
+│       ├── decoder/                      # Packet Decoder
+│       ├── pipeline/                     # Motion / PPG / Step pipelines
+│       ├── database/                     # Session storage & history
+│       ├── dashboard/                    # Live dashboard UI
+│       ├── export/                       # CSV / JSON / ZIP export
+│       └── diagnostics/                  # BLE + pipeline diagnostics
 │
 ├── dashboard/
 │   └── python/
@@ -700,7 +966,69 @@ ParkinSense
 └── README.md
 ```
 
-The repository is intentionally modular to support rapid algorithm development while maintaining separation between firmware, analytics, and future machine-learning components.
+**Folder responsibilities**
+
+| Folder | Responsibility |
+|---|---|
+| `firmware/` | Wearable firmware — v3 (development) and v4 (power-optimized) variants |
+| `Android/` | Native Android companion app — BLE, on-device processing, dashboard, recording, replay, export |
+| `dashboard/python/activity/` | Step-tracking pipeline (`step_counter.py`) |
+| `dashboard/python/ppg/` | PPG pipeline (`ppg_processor.py`, `algorithms.py`) |
+| `dashboard/python/pipeline/`, `pipelines/` | Motion pipeline and unified runtime pipeline orchestration |
+| `dashboard/python/filters/` | Gravity removal, notch, and band-pass filtering |
+| `dashboard/python/detector/`, `detectors/` | Tremor detection and state-machine logic |
+| `dashboard/python/features/` | Per-axis feature extraction |
+| `dashboard/python/context/` | Motion-context classification (`REST` / `LOW MOTION` / `ACTIVE`) |
+| `dashboard/python/fusion/` | Motion-aware confidence fusion |
+| `dashboard/python/runtime/` | Runtime V2 — packet decoding and cross-pipeline orchestration |
+| `dashboard/python/realtime/` | Realtime CSV/JSON logging |
+| `dashboard/python/replay/` | Offline replay framework |
+| `dashboard/python/dataset/` | Dataset generation utilities |
+| `dashboard/python/calibration/` | Calibration routines |
+| `dashboard/python/inference/`, `models/` | Reserved for future ML models |
+| `docs/` | Project documentation |
+| `hardware/` | Hardware design files |
+| `research/` | Research notes and the IEEE paper |
+
+The repository is intentionally modular to support rapid algorithm development while maintaining separation between firmware, mobile, analytics, and future machine-learning components.
+
+<br>
+
+## 📸 Wearable Platform
+
+<div align="center">
+
+| Prototype | Wrist Wear |
+|---|---|
+| `docs/images/prototype_enclosure.jpg` | `docs/images/wrist_wear.jpg` |
+
+| Dashboard | Android App |
+|---|---|
+| `docs/images/dashboard_screenshot.jpg` | `docs/images/android_app.jpg` |
+
+| Architecture |
+|---|
+| `docs/images/architecture_diagram.png` |
+
+</div>
+
+*(Add the corresponding image files under `docs/images/` for these to render on GitHub.)*
+
+<br>
+
+## 📷 App Screenshots
+
+| Screen | Image |
+|---|---|
+| Connection Screen | `docs/images/app_connection.jpg` |
+| Dashboard | `docs/images/app_dashboard.jpg` |
+| Session History | `docs/images/app_session_history.jpg` |
+| Replay | `docs/images/app_replay.jpg` |
+| Export | `docs/images/app_export.jpg` |
+| Settings | `docs/images/app_settings.jpg` |
+| Diagnostics | `docs/images/app_diagnostics.jpg` |
+
+*(Add the corresponding image files under `docs/images/` for these to render on GitHub.)*
 
 <br>
 
@@ -719,12 +1047,13 @@ This guide walks through setting up the complete ParkinSense platform, from flas
 | MAX30102 | Optical PPG sensor |
 | 3.7 V 700 mAh Li-ion Battery (902035) | Portable power supply |
 | USB-C Cable | Programming and charging |
-| BLE-enabled Computer | Runtime and dashboard |
+| BLE-enabled Computer or Android Device | Runtime and dashboard |
 
 **Software**
 - Python 3.11+
 - Arduino IDE 2.x
 - Git
+- Android Studio (for the companion app)
 
 ```bash
 pip install numpy scipy pandas matplotlib plotly dash bleak pyqtgraph
@@ -751,9 +1080,14 @@ Expected output:
 
 ### Flash the Firmware
 
-Open Arduino IDE and navigate to:
+Open Arduino IDE and navigate to the development firmware for day-to-day iteration:
 ```
 firmware/xiao_nrf52840/src/parksense_wearable_v3/
+```
+
+Or the power-optimized build for actual wearable deployment:
+```
+firmware/xiao_nrf52840/src/parksense_wearable_v4/
 ```
 
 Install required libraries:
@@ -805,12 +1139,23 @@ python dashboard/python/dashboard/realtime_dashboard_v2.py
 
 Open **http://127.0.0.1:8050** — the dashboard updates continuously while the wearable is streaming.
 
+### Use the Android App
+
+Build and install the app from `Android/` in Android Studio, then:
+
+1. Open the app and scan for nearby ParkinSense wearables
+2. Connect — the app negotiates MTU and starts streaming automatically
+3. View live neurological, physiological, and activity data on the dashboard
+4. Start a recording to capture a full session
+5. Review, export, or replay sessions from Session History
+
 ### Complete Workflow
 
 ```
-Flash Firmware → Power Wearable → BLE Advertising → Runtime V2
+Flash Firmware (v3 dev / v4 power-optimized) → Power Wearable → BLE Advertising
+       → Runtime V2 (Python) or Android App
        → Packet Decoder → Motion Pipeline + PPG Pipeline + Step Counter Pipeline
-       → Digital Biomarkers → CSV/JSON Logging → Dashboard
+       → Digital Biomarkers → CSV/JSON Logging / Session Storage → Dashboard
 ```
 
 ### Sample Runtime Output
@@ -876,6 +1221,8 @@ Every processed sample is logged to `realtime_capture_v2.csv` for offline replay
 | Active Minutes stuck at 0 | Bout must sustain past the minimum duration and cadence threshold — brief walks won't qualify |
 | Runtime crashes | Confirm Python dependencies are installed |
 | BLE disconnects | Restart runtime and reconnect |
+| Android app can't find device | Check Bluetooth/Location permissions and confirm firmware is advertising |
+| Android app keeps disconnecting | Check the Diagnostics page for RSSI, reconnect count, and BLE state |
 
 <br>
 
@@ -893,6 +1240,9 @@ Every processed sample is logged to `realtime_capture_v2.csv` for offline replay
 | Packet Size | 248 Bytes |
 | Runtime Latency | <100 ms after analysis window |
 | Dashboard Refresh | 100 ms |
+| Active Current (v4, measured) | ~7 mA |
+| Deep Sleep Current (v4, measured) | Microamp range |
+| Estimated Battery Life (v4) | ~100 hours continuous |
 | Runtime | Continuous |
 
 The current implementation supports simultaneous IMU and optical streaming, running the motion, PPG, and step-counter pipelines every cycle, while maintaining stable BLE throughput and continuous CSV logging.
@@ -958,9 +1308,11 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - [x] BLE Packet Versioning
 - [x] Realtime CSV Logging
 - [x] JSON Metrics Export
-- [ ] Battery Monitoring
-- [ ] Power Optimization
-- [ ] Mobile Companion App
+- [x] Power Optimization (v4 Firmware)
+- [x] Mobile Companion App (Android)
+- [ ] Battery Level Monitoring
+- [ ] Cloud Sync
+- [ ] OTA Firmware Updates
 
 **Phase 7 — Machine Learning**
 - [ ] Adaptive Thresholds
@@ -1005,13 +1357,14 @@ The current implementation supports simultaneous IMU and optical streaming, runn
 - Floors climbed
 
 **Platform**
-- Battery monitoring
-- Mobile companion app
+- Battery-level monitoring
 - Cloud synchronization
 - OTA firmware updates
 - Longitudinal analytics
 - Personalized models
 - Digital therapeutics
+- Clinician portal
+- Medication tracking
 
 <br>
 
