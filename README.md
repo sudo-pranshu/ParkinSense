@@ -42,7 +42,6 @@
 - [Android Companion Application](#-android-companion-application)
 - [Repository Structure](#-repository-structure)
 - [Wearable Platform](#-wearable-platform)
-- [App Screenshots](#-app-screenshots)
 - [Getting Started](#-getting-started)
 - [Performance](#-performance)
 - [Development Roadmap](#%EF%B8%8F-development-roadmap)
