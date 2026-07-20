@@ -829,19 +829,76 @@ pNN50          : 12.5 %
 
 ## 🗺️ Development Roadmap
 
-**Phase 1 — Hardware:** ✅ LSM6DS3 · ✅ MAX30102 · ✅ BLE Streaming · ✅ Battery-powered Operation
+**Phase 1 — Hardware**
+- [x] LSM6DS3 Integration
+- [x] MAX30102 Integration
+- [x] BLE Streaming
+- [x] Battery-powered Operation
 
-**Phase 2 — Signal Processing:** ✅ Gravity Removal · ✅ Notch Filter · ✅ Butterworth Band-pass · ✅ Motion Context · ✅ Feature Extraction · ✅ Multi-axis Detector · ✅ Confidence Estimation · ✅ Temporal Validation · ✅ State Machine
+**Phase 2 — Signal Processing**
+- [x] Gravity Removal
+- [x] Notch Filter
+- [x] Butterworth Band-pass
+- [x] Motion Context
+- [x] Feature Extraction
+- [x] Multi-axis Detector
+- [x] Confidence Estimation
+- [x] Temporal Validation
+- [x] State Machine
 
-**Phase 3 — Physiological Monitoring:** ✅ IR/RED Acquisition · ✅ Finger Detection · ✅ Signal Quality · ✅ Sensor Status · ✅ Heart Rate · ✅ RR Extraction · ✅ HRV (RMSSD, SDNN, Mean RR, pNN50) · ✅ SpO₂ · ✅ Motion-aware HR Confidence
+**Phase 3 — Physiological Monitoring**
+- [x] IR Acquisition
+- [x] RED Acquisition
+- [x] Finger Detection
+- [x] Signal Quality Estimation
+- [x] Sensor Status Classification
+- [x] Heart Rate
+- [x] RR Interval Extraction
+- [x] HRV (RMSSD, SDNN, Mean RR, pNN50)
+- [x] SpO₂ Estimation
+- [x] Motion-aware HR Confidence
 
-**Phase 4 — Activity Monitoring:** ✅ Step Counter · ✅ Cadence · ✅ Distance · ✅ Walking Detection · ✅ Active Minutes · ⬜ Activity Type Classification · ⬜ Floors Climbed · ⬜ Calorie Estimation · ⬜ VO₂ Max
+**Phase 4 — Activity Monitoring**
+- [x] Step Counter
+- [x] Cadence Estimation
+- [x] Distance Estimation
+- [x] Walking Detection
+- [x] Active Minute Accounting
+- [ ] Activity Type Classification
+- [ ] Floors Climbed
+- [ ] Calorie Estimation
+- [ ] VO₂ Max
 
-**Phase 5 — Digital Biomarkers:** ✅ Tremor Frequency/Score/Confidence · ✅ Motion Context · ✅ Tremor Burden · ✅ Rest Index · ✅ HR/HRV/SpO₂ Biomarkers · ✅ Step/Cadence/Distance/Active-Minute Biomarkers
+**Phase 5 — Digital Biomarkers**
+- [x] Tremor Frequency
+- [x] Tremor Score
+- [x] Confidence
+- [x] Motion Context
+- [x] Tremor Burden
+- [x] Rest Index
+- [x] Heart Rate / HRV / SpO₂ Biomarkers
+- [x] Step / Cadence / Distance / Active Minute Biomarkers
 
-**Phase 6 — Wearable Platform:** ✅ Rechargeable Li-ion Operation · ✅ Live Dashboard · ✅ Runtime V2 · ✅ BLE Packet Versioning · ✅ Realtime CSV/JSON Logging · ✅ Power Optimization (v4) · ✅ Android Companion App · ⬜ Battery Level Monitoring · ⬜ Cloud Sync · ⬜ OTA Firmware Updates
+**Phase 6 — Wearable Platform**
+- [x] Rechargeable Li-ion Operation
+- [x] Live Dashboard
+- [x] Runtime V2 (Unified Motion + PPG + Activity)
+- [x] BLE Packet Versioning
+- [x] Realtime CSV Logging
+- [x] JSON Metrics Export
+- [x] Power Optimization (v4 Firmware)
+- [x] Mobile Companion App (Android)
+- [ ] Battery Level Monitoring
+- [ ] Cloud Sync
+- [ ] OTA Firmware Updates
 
-**Phase 7 — Machine Learning:** ⬜ Adaptive Thresholds · ⬜ Personalized Models · ⬜ Activity Recognition · ⬜ Bradykinesia Detection · ⬜ Dyskinesia Detection · ⬜ Long-term Progression Analysis
+**Phase 7 — Machine Learning**
+- [ ] Adaptive Thresholds
+- [ ] Personalized Models
+- [ ] Activity Recognition
+- [ ] Bradykinesia Detection
+- [ ] Dyskinesia Detection
+- [ ] Long-term Progression Analysis
 
 <br>
 
