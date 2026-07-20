@@ -8,7 +8,7 @@
 
 <br>
 
-<img src="docs/images/prototype_hand.jpg" width="600">
+<img src="docs/images/prototype_hand.jpg" width="300">
 
 <br><br>
 
