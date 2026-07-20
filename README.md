@@ -96,7 +96,7 @@ The project spans the complete wearable stack: from firmware on a Nordic nRF5284
 
 | Dashboard — Resting State | Dashboard — Tremor Detected |
 |:---:|:---:|
-| <img src="docs/images/dashboard_normal.png" width="380"> | <img src="docs/images/dashboard_tremor.png" width="380"> |
+| <img src="docs/images/dashboard_normal.jpg" width="380"> | <img src="docs/images/dashboard_tremor.jpg" width="380"> |
 
 </div>
 
@@ -523,7 +523,7 @@ This cross-pipeline architecture improves robustness without duplicating computa
 
 | Resting State | Tremor Detected |
 |:---:|:---:|
-| <img src="docs/images/dashboard_normal.png" width="420"> | <img src="docs/images/dashboard_tremor.png" width="420"> |
+| <img src="docs/images/dashboard_normal.jpg" width="420"> | <img src="docs/images/dashboard_tremor.jpg" width="420"> |
 
 </div>
 
