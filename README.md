@@ -304,9 +304,10 @@ Every hardware component was selected to balance power consumption, processing c
 | Samples / Packet | 10 |
 | Packet Size | 248 Bytes |
 | Motion Analysis Window | 4 seconds |
+| Analysis Hop (window advance) | 0.5 seconds (87.5% overlap) |
 | PPG Analysis Window | 10 seconds (rolling) |
 | Step Detector Adaptive Window | ~2 seconds |
-| Dashboard Refresh | 100 ms |
+| Dashboard Refresh | 100 ms (poll interval) |
 
 <br>
 
@@ -408,6 +409,10 @@ Fusion --> Export["CSV / JSON Export"]
 ### 🧠 Motion Pipeline
 
 Responsible for continuous neurological assessment using synchronized accelerometer and gyroscope data. Its objective is not simply to detect tremor, but to determine whether observed motion is consistent with Parkinsonian rest tremor while rejecting voluntary movement and environmental artifacts.
+
+The pipeline separates two clocks. Sample-rate consumers — the PPG rolling buffer and the step detector — receive every sample, because their state *is* the signal. Windowed analysis (filtering, feature extraction, tremor scoring, PPG biomarkers) advances the 4-second window by a **0.5-second hop**, giving 87.5% overlap between consecutive windows and a 2 Hz biomarker update. Re-analysing on every sample would recompute a 99.8%-identical window ~104 times per second without producing new information; the hop is chosen so that consecutive analyses carry enough independent evidence for the temporal state machine to be meaningful, rather than on computational grounds. Raw signal and step-tracking columns are still logged at the full sample rate, so recordings retain full temporal resolution for replay and offline re-analysis.
+
+Design rationale for the window and hop, including the alternatives rejected, is recorded in [`docs/adr/`](docs/adr/).
 
 | Stage | Purpose |
 |---------|---------|
@@ -806,12 +811,14 @@ pNN50          : 12.5 %
 | PPG Sampling | ~50 Hz |
 | BLE Streaming | ~104 Hz |
 | Motion Analysis Window | 4 s |
+| Analysis Hop | 0.5 s (87.5% window overlap) |
+| Biomarker Update Rate | 2 Hz |
 | PPG Analysis Window | 10 s (rolling) |
 | Step Detector Adaptive Window | ~2 s (rolling) |
 | SpO₂ Publish Cadence | ~10 s (throttled) |
 | Packet Size | 248 Bytes |
-| Runtime Latency | <100 ms after analysis window |
-| Dashboard Refresh | 100 ms |
+| Raw Capture Logging | Per sample (~104 Hz) |
+| Dashboard Refresh | 100 ms (poll interval) |
 | Active Current (v4, measured) | ~7 mA |
 | Deep Sleep Current (v4, measured) | Microamp range |
 | Estimated Battery Life (v4) | ~100 hours continuous |

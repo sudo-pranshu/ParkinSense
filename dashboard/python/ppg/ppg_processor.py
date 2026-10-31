@@ -138,19 +138,36 @@ class PPGProcessor:
         self._ir_buffer: deque[float] = deque(maxlen=window_size)
         self._red_buffer: deque[float] = deque(maxlen=window_size)
 
+        # Most recently ingested raw sample pair, echoed back in the
+        # analysis result's "ir"/"red" fields. Held here rather than passed
+        # into `analyze()` so that analysis needs no knowledge of the
+        # ingestion cadence.
+        self._last_ir: int | None = None
+        self._last_red: int | None = None
+
         # --- Heart-rate EMA state ---
         self._hr_ema: float | None = None
-        self._hr_outlier_reject_streak = 0
-        self._hr_outlier_max_reject_samples = max(
-            int(HR_EMA_OUTLIER_MAX_REJECT_SECONDS * sample_rate), 1
-        )
+        # Monotonic timestamp at which the current unbroken run of withheld
+        # EMA updates began; None when the last update was accepted.
+        #
+        # This was previously a *call counter* compared against
+        # `HR_EMA_OUTLIER_MAX_REJECT_SECONDS * sample_rate`, which silently
+        # assumed `analyze()` is invoked exactly once per sample. That
+        # assumption is not part of this class's contract — the runtime
+        # ingests per sample but analyses on a slower hop — so the threshold
+        # is now measured as elapsed monotonic time. The safety valve then
+        # releases after a fixed physiological interval regardless of how
+        # often analysis runs, and regardless of the configured sample rate.
+        self._hr_outlier_reject_since: float | None = None
 
         # --- Finger-presence hysteresis state machine ---
-        self._finger_on_samples_required = max(int(FINGER_ON_HYSTERESIS_SECONDS * sample_rate), 1)
-        self._finger_off_samples_required = max(int(FINGER_OFF_HYSTERESIS_SECONDS * sample_rate), 1)
-        self._session_reset_samples_required = max(int(SESSION_RESET_SECONDS * sample_rate), 1)
-        self._finger_on_streak = 0
-        self._finger_off_streak = 0
+        # Monotonic timestamp at which the raw per-sample detector last
+        # changed its verdict, plus that verdict. Elapsed time against
+        # FINGER_ON/OFF_HYSTERESIS_SECONDS decides when the *published*
+        # state follows. Time-based for the same reason as above: these
+        # constants are expressed in seconds and must mean seconds.
+        self._finger_raw_state: bool | None = None
+        self._finger_raw_since: float | None = None
         self._finger_confirmed = False  # this is what gets published as finger_detected
 
         # --- SpO2 throttled-publish state ---
@@ -165,14 +182,38 @@ class PPGProcessor:
         """Clear all buffers and state, e.g. after a sensor reattachment event."""
         self._ir_buffer.clear()
         self._red_buffer.clear()
+        self._last_ir = None
+        self._last_red = None
         self._hr_ema = None
-        self._hr_outlier_reject_streak = 0
-        self._finger_on_streak = 0
-        self._finger_off_streak = 0
+        self._hr_outlier_reject_since = None
+        self._finger_raw_state = None
+        self._finger_raw_since = None
         self._finger_confirmed = False
         self._spo2_last_publish_monotonic = None
         self._latest_valid_spo2 = None
         self._published_spo2 = None
+
+    def ingest(self, ir: int | None, red: int | None) -> None:
+        """
+        Append one raw IR/RED sample pair to the rolling buffers without
+        running any analysis.
+
+        Separated from `analyze()` because the two operate on different
+        clocks. The rolling buffer *is* the PPG waveform, so ingestion must
+        happen once per received sample or the signal itself is decimated.
+        Analysis, by contrast, is a windowed operation whose output cannot
+        change meaningfully between consecutive samples, so a caller is free
+        to run it on a slower hop.
+
+        Either channel may be `None` if that sample was dropped over BLE;
+        that channel's buffer is simply left untouched for this call.
+        """
+        if ir is not None:
+            self._ir_buffer.append(ir)
+            self._last_ir = ir
+        if red is not None:
+            self._red_buffer.append(red)
+            self._last_red = red
 
     def process(
         self,
@@ -234,13 +275,29 @@ class PPGProcessor:
         All fields present in earlier revisions are unchanged in name and
         meaning; `timestamp`, `monotonic_timestamp`, and `motion_state` are
         new in this revision.
+
+        Implementation note: this is now a thin convenience wrapper over
+        `ingest()` + `analyze()`. Behaviour, signature and returned keys are
+        unchanged for every existing caller; callers that need to ingest at
+        the sample rate but analyse on a slower hop should call the two
+        halves directly instead.
+        """
+        self.ingest(ir, red)
+        return self.analyze(motion_state=motion_state, debug=debug)
+
+    def analyze(self, motion_state: str | None = None, debug: bool = False) -> dict:
+        """
+        Run the full windowed analysis over the currently buffered samples
+        and return one processed reading.
+
+        This performs no ingestion — call `ingest()` for that. The returned
+        `"ir"` / `"red"` fields echo the most recently ingested raw sample
+        pair, so the output shape matches `process()` exactly regardless of
+        which entry point the caller used.
+
+        See `process()` for the full parameter and return-value contract.
         """
         now_monotonic = time.monotonic()
-
-        if ir is not None:
-            self._ir_buffer.append(ir)
-        if red is not None:
-            self._red_buffer.append(red)
 
         # Single conversion to numpy arrays per call — every downstream
         # algorithm reuses these instead of re-converting the deque itself.
@@ -257,35 +314,40 @@ class PPGProcessor:
         sensor_status = classify_sensor_status(ir_arr, sqi_score=quality["score"])
 
         # --- Finger-presence hysteresis ---
-        # Track how many *consecutive* samples agree with the raw per-
-        # sample detector before trusting a state change. This is the same
-        # persistence-counter pattern used by the tremor-event detector
-        # elsewhere in ParkinSense, just applied to finger contact instead
-        # of tremor bursts.
-        if raw_finger["detected"]:
-            self._finger_on_streak += 1
-            self._finger_off_streak = 0
+        # Require the raw per-sample detector to hold the same verdict for a
+        # continuous stretch of *time* before the published state follows it.
+        # Asymmetric on purpose (short ON delay, longer OFF delay) so a brief
+        # wobble doesn't flash "no finger".
+        raw_detected = bool(raw_finger["detected"])
+        if raw_detected is not self._finger_raw_state:
+            self._finger_raw_state = raw_detected
+            self._finger_raw_since = now_monotonic
+
+        # Explicit None check, not `or`: `_finger_raw_since` is a monotonic
+        # timestamp and 0.0 is a legitimate value (any injected or rebased
+        # clock can start there), which `or` would silently treat as unset.
+        since = self._finger_raw_since
+        held_for = 0.0 if since is None else now_monotonic - since
+
+        if raw_detected:
+            if not self._finger_confirmed and held_for >= FINGER_ON_HYSTERESIS_SECONDS:
+                self._finger_confirmed = True
         else:
-            self._finger_off_streak += 1
-            self._finger_on_streak = 0
+            if self._finger_confirmed and held_for >= FINGER_OFF_HYSTERESIS_SECONDS:
+                self._finger_confirmed = False
 
-        if not self._finger_confirmed and self._finger_on_streak >= self._finger_on_samples_required:
-            self._finger_confirmed = True
-
-        if self._finger_confirmed and self._finger_off_streak >= self._finger_off_samples_required:
-            self._finger_confirmed = False
-
-        # Session-scoped reset uses a longer, independent threshold than
-        # the publish-state hysteresis above. A finger lifted and replaced
-        # within SESSION_RESET_SECONDS still keeps its EMA/SpO2 cache; only
-        # a sustained removal past this longer window is treated as the
-        # start of a new physiological session.
-        if self._finger_off_streak >= self._session_reset_samples_required:
-            self._hr_ema = None
-            self._hr_outlier_reject_streak = 0
-            self._latest_valid_spo2 = None
-            self._published_spo2 = None
-            self._spo2_last_publish_monotonic = None
+            # Session-scoped reset uses a longer, independent threshold than
+            # the publish-state hysteresis above. A finger lifted and replaced
+            # within SESSION_RESET_SECONDS still keeps its EMA/SpO2 cache; only
+            # a sustained removal past this longer window is treated as the
+            # start of a new physiological session. Idempotent, so it costs
+            # nothing to re-apply on each analysis while the finger stays off.
+            if held_for >= SESSION_RESET_SECONDS:
+                self._hr_ema = None
+                self._hr_outlier_reject_since = None
+                self._latest_valid_spo2 = None
+                self._published_spo2 = None
+                self._spo2_last_publish_monotonic = None
 
         finger_detected = self._finger_confirmed
 
@@ -324,22 +386,27 @@ class PPGProcessor:
                     # First valid estimate of the session — nothing to
                     # smooth against yet, so it just becomes the baseline.
                     self._hr_ema = raw_heart_rate
-                    self._hr_outlier_reject_streak = 0
+                    self._hr_outlier_reject_since = None
                 else:
                     jump = abs(raw_heart_rate - self._hr_ema)
                     is_low_confidence_jump = (
                         jump > HR_EMA_OUTLIER_THRESHOLD_BPM
                         and hr_estimator_confidence < HR_EMA_OUTLIER_CONFIDENCE_GATE
                     )
+                    rejecting_for = (
+                        0.0 if self._hr_outlier_reject_since is None
+                        else now_monotonic - self._hr_outlier_reject_since
+                    )
                     if (
                         is_low_confidence_jump
-                        and self._hr_outlier_reject_streak < self._hr_outlier_max_reject_samples
+                        and rejecting_for < HR_EMA_OUTLIER_MAX_REJECT_SECONDS
                     ):
                         # Large jump + weak peak/rhythm confidence reads as
                         # a motion artifact riding through the analysis
                         # window rather than a real HR change. Hold the EMA
                         # steady this call instead of updating it.
-                        self._hr_outlier_reject_streak += 1
+                        if self._hr_outlier_reject_since is None:
+                            self._hr_outlier_reject_since = now_monotonic
                     else:
                         # Either a normal-sized update, or a confident big
                         # jump (real change), or we've been rejecting long
@@ -348,7 +415,7 @@ class PPGProcessor:
                             self.hr_ema_alpha * raw_heart_rate
                             + (1.0 - self.hr_ema_alpha) * self._hr_ema
                         )
-                        self._hr_outlier_reject_streak = 0
+                        self._hr_outlier_reject_since = None
             heart_rate = round(self._hr_ema, 1) if self._hr_ema is not None else None
 
             # --- HR quality breakdown ---
@@ -419,8 +486,8 @@ class PPGProcessor:
             "heart_rate": heart_rate,
             "spo2": spo2,
             "confidence": round(overall_confidence, 3),
-            "ir": ir,
-            "red": red,
+            "ir": self._last_ir,
+            "red": self._last_red,
             # --- diagnostics present since the previous revision ---
             "rr_intervals_ms": rr_intervals_ms,
             "finger_reason": raw_finger["reason"],

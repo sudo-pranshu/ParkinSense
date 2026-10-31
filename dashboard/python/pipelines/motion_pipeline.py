@@ -37,6 +37,20 @@ class MotionPipeline:
         
         self.ppg = PPGProcessor()
 
+    def ingest_ppg(self, ir, red):
+        """
+        Feed one raw IR/RED sample pair into the PPG rolling buffer without
+        running any analysis.
+
+        Exposed because PPG ingestion and windowed analysis run on different
+        clocks: the buffer holds the PPG waveform itself and must receive
+        every sample, whereas `process()` is a windowed operation a caller
+        may legitimately run on a slower hop. A caller that drives the two
+        separately should call this per sample and then invoke `process()`
+        with `ir=None, red=None` so the sample is not counted twice.
+        """
+        self.ppg.ingest(ir, red)
+
     def preprocess(self, signal):
 
         signal = self.notch.filter(signal)
@@ -86,10 +100,13 @@ class MotionPipeline:
             context
         )
         
-        ppg = self.ppg.process(
-            ir,
-            red
-        )
+        # Ingestion is conditional so a caller that already ingested this
+        # sample via `ingest_ppg()` can pass ir=red=None and get analysis
+        # only, without the sample being appended to the buffer twice.
+        if ir is not None or red is not None:
+            self.ppg.ingest(ir, red)
+
+        ppg = self.ppg.analyze()
 
         best = features[result["best_axis"]]
 

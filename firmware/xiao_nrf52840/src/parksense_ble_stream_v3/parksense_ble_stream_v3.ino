@@ -1,270 +1,199 @@
+/*
+  MQ-9 / MQ-135 voltage and resistance logger for classic ESP32 (ESP32-WROOM-32)
+  Arduino-ESP32 core; logs CSV to an SPI microSD card.
+
+  Default wiring assumed:
+    MQ module AO -- 12k resistor --+--> MCP6002 buffer non-inverting input
+                                  |
+                                10k resistor
+                                  |
+                                 GND
+    MCP6002 buffer output -> ESP32 GPIO34
+    Divider/buffer GND, MQ GND, ESP32 GND and SD GND must be common.
+
+  Classic ESP32 VSPI pins for microSD (configured explicitly below):
+    SD SCK  -> GPIO18
+    SD MISO -> GPIO19
+    SD MOSI -> GPIO23
+    SD CS   -> GPIO5
+
+  IMPORTANT:
+  - Sensor AO is reconstructed from the divider ratio. The assumed divider is
+    12k (top) and 10k (bottom), so V_AO ~= V_GPIO34 * 2.2.
+  - The Rs estimate is valid only when MQ AO is the direct Rs/RL junction of
+    the usual MQ sensing divider. Set MQ_MODULE_RL_OHMS to the actual onboard
+    load resistor. The external 12k+10k divider loads AO, so the code includes
+    that 22k path in parallel with the module's RL when calculating Rs.
+  - If you do not know the module RL/topology, set CALCULATE_RS to false; the
+    CSV will still contain raw ADC, measured voltage and reconstructed AO.
+  - This does NOT calculate gas concentration in ppm. That requires R0
+    calibration and gas-specific curve parameters.
+*/
+
 #include <Arduino.h>
-#include <bluefruit.h>
-#include <Wire.h>
-#include "LSM6DS3.h"
-#include <MAX30105.h>
+#include <SPI.h>
+#include <SD.h>
+#include <math.h>
 
-LSM6DS3 imu(I2C_MODE, 0x6A);
-MAX30105 max30102;
+// ---------- USER CONFIGURATION ----------
+const char *SENSOR_NAME = "MQ135";       // Change to "MQ9" when testing MQ-9
+const char *LOG_FILE_PATH = "/mq_log.csv";
 
-// ParkinSense BLE Service
-BLEService imuService("ABCD1234-0000-467A-9538-01F0652C74E0");
-BLECharacteristic imuChar(
-    "ABCD1234-0001-467A-9538-01F0652C74E0",
-    BLENotify,
-    244
-);
+constexpr int SENSOR_ADC_PIN = 34;        // ADC1_CH6, input-only pin on classic ESP32
+constexpr int SD_CS_PIN   = 5;
+constexpr int SD_SCK_PIN  = 18;
+constexpr int SD_MISO_PIN = 19;
+constexpr int SD_MOSI_PIN = 23;
 
-// ---- Configuration ----
-const uint32_t SAMPLE_INTERVAL_US = 9615; // ~104 Hz
-const uint8_t BATCH_SIZE = 10;
-const uint32_t INTERVAL_RECONNECT_MS = 10000; // retry dead sensors every 10s
-const uint8_t MAX_CATCHUP_INTERVALS = 5; // bounded catch-up cap
+constexpr uint32_t LOG_INTERVAL_MS = 1000; // One record per second
+constexpr uint8_t  NUM_ADC_SAMPLES = 16;   // Average this many measurements
 
-// ---- Packet Structures ----
-#pragma pack(push,1)
-struct PacketHeader
-{
-    uint8_t version;
-    uint8_t flags;
-    uint16_t reserved;
-    uint32_t timestamp_us;
+// External AO protection divider: AO -- R_TOP -- ADC node -- R_BOTTOM -- GND
+constexpr float DIVIDER_R_TOP_OHMS    = 12000.0f;
+constexpr float DIVIDER_R_BOTTOM_OHMS = 10000.0f;
+
+// Sensor sensing-circuit supply and onboard RL. Change RL to the ACTUAL value
+// from the MQ module schematic/marking, not the comparator potentiometer.
+constexpr float MQ_VC_VOLTS = 5.0f;
+constexpr float MQ_MODULE_RL_OHMS = 10000.0f;  // Example only; verify your module
+constexpr bool  CALCULATE_RS = true;           // Set false if RL/topology unknown
+
+// ---------- INTERNAL STATE ----------
+uint32_t lastLogMs = 0;
+
+struct Reading {
+  uint16_t raw;
+  uint32_t adcMilliVolts;
+  float adcVolts;
+  float reconstructedAoVolts;
+  float estimatedRsOhms;
 };
 
-struct IMUSample
-{
-    int16_t ax;
-    int16_t ay;
-    int16_t az;
-    int16_t gx;
-    int16_t gy;
-    int16_t gz;
-    uint32_t ir;
-    uint32_t red;
-};
-
-struct IMUPacket
-{
-    PacketHeader header;
-    IMUSample samples[BATCH_SIZE];
-};
-#pragma pack(pop)
-
-// ---- Globals ----
-IMUPacket packet;
-uint8_t batchIndex = 0;
-uint32_t lastSampleUs = 0;
-uint32_t sampleCounter = 0;
-uint32_t lastRateReport = 0;
-uint32_t lastReconnectMs = 0;
-
-bool imuReady = false;
-bool spo2Ready = false;
-
-// PPG (MAX30102) globals - runs at 10 Hz, independent of IMU loop
-uint32_t lastPPGMs = 0;
-uint32_t latestIR = 0;
-uint32_t latestRED = 0;
-
-// ---- Sensor Inits (non-blocking, retried in loop if they fail) ----
-void initIMU()
-{
-    if (imu.begin() != 0)
-    {
-        Serial.println("IMU INIT FAILED (will retry)");
-        imuReady = false;
-    }
-    else
-    {
-        imu.settings.accelEnabled = 1;
-        imu.settings.gyroEnabled = 1;
-        imu.settings.accelRange = 4;
-        imu.settings.gyroRange = 245;
-        Serial.println("IMU OK");
-        imuReady = true;
-    }
+float parallelResistance(float r1, float r2) {
+  if (r1 <= 0.0f || r2 <= 0.0f) return 0.0f;
+  return 1.0f / ((1.0f / r1) + (1.0f / r2));
 }
 
-void initSPO2()
-{
-    if (max30102.begin(Wire, I2C_SPEED_STANDARD) == false)
-    {
-        Serial.println("MAX30102 INIT FAILED (will retry)");
-        spo2Ready = false;
+Reading readSensor() {
+  uint32_t rawSum = 0;
+  uint64_t milliVoltSum = 0;
+
+  for (uint8_t i = 0; i < NUM_ADC_SAMPLES; ++i) {
+    rawSum += static_cast<uint16_t>(analogRead(SENSOR_ADC_PIN));
+    milliVoltSum += analogReadMilliVolts(SENSOR_ADC_PIN);
+    delay(2);
+  }
+
+  Reading r{};
+  r.raw = static_cast<uint16_t>(rawSum / NUM_ADC_SAMPLES);
+  r.adcMilliVolts = static_cast<uint32_t>(milliVoltSum / NUM_ADC_SAMPLES);
+  r.adcVolts = r.adcMilliVolts / 1000.0f;
+
+  const float dividerRatio =
+      (DIVIDER_R_TOP_OHMS + DIVIDER_R_BOTTOM_OHMS) / DIVIDER_R_BOTTOM_OHMS;
+  r.reconstructedAoVolts = r.adcVolts * dividerRatio;
+  r.estimatedRsOhms = NAN;
+
+  if (CALCULATE_RS && MQ_MODULE_RL_OHMS > 0.0f &&
+      r.reconstructedAoVolts > 0.005f &&
+      r.reconstructedAoVolts < MQ_VC_VOLTS) {
+    // The external divider presents a (Rtop + Rbottom) load from AO to GND.
+    // If AO is the direct Rs/RL junction, this path is in parallel with RL.
+    const float externalDividerLoad =
+        DIVIDER_R_TOP_OHMS + DIVIDER_R_BOTTOM_OHMS;
+    const float effectiveRl = parallelResistance(
+        MQ_MODULE_RL_OHMS, externalDividerLoad);
+    r.estimatedRsOhms = effectiveRl *
+        ((MQ_VC_VOLTS / r.reconstructedAoVolts) - 1.0f);
+
+    if (r.estimatedRsOhms < 0.0f) {
+      r.estimatedRsOhms = NAN;
     }
-    else
-    {
-        // powerLevel, sampleAverage, ledMode(2=Red+IR), sampleRate, pulseWidth, adcRange
-        max30102.setup(0x1F, 1, 2, 100, 411, 4096);
-        Serial.println("MAX30102 OK");
-        spo2Ready = true;
-    }
+  }
+
+  return r;
 }
 
-// ---- Setup ----
-void setup()
-{
-    Serial.begin(115200);
-    uint32_t serialWaitStart = millis();
-    while (!Serial && (millis() - serialWaitStart) < 3000)
-    {
-        delay(10);
-    }
+bool openLogAndWriteHeaderIfNeeded() {
+  File file = SD.open(LOG_FILE_PATH, FILE_APPEND);
+  if (!file) {
+    Serial.println("ERROR: Could not open the CSV log file on the SD card.");
+    return false;
+  }
 
-    Wire.begin();
-    Wire.setClock(400000);
-
-    initIMU();
-    initSPO2();
-
-    Bluefruit.configPrphConn(
-        247,
-        247,
-        6,
-        6
-    );
-    Bluefruit.begin();
-    Bluefruit.setTxPower(4);
-    Bluefruit.setName("ParkinSense");
-
-    imuService.begin();
-    imuChar.begin();
-
-    Bluefruit.Advertising.addService(imuService);
-    Bluefruit.Advertising.addName();
-    Bluefruit.Advertising.restartOnDisconnect(true);
-    Bluefruit.Advertising.start(0);
-
-    Serial.println("ParkinSense V2 Ready");
-
-    lastSampleUs = micros();
-    lastPPGMs = millis();
-    lastReconnectMs = millis();
+  if (file.size() == 0) {
+    file.println("elapsed_ms,sensor,adc_gpio,adc_raw,adc_pin_mV,reconstructed_AO_V,estimated_Rs_ohm");
+    file.flush();
+  }
+  file.close();
+  return true;
 }
 
-// ---- Loop ----
-void loop()
-{
-    uint32_t nowMs = millis();
+void logOneSample(uint32_t elapsedMs) {
+  const Reading r = readSensor();
 
-    // ---- Retry any sensor that failed to init, every 10s ----
-    if (nowMs - lastReconnectMs >= INTERVAL_RECONNECT_MS)
-    {
-        lastReconnectMs = nowMs;
-        if (!imuReady)
-        {
-            Serial.println("Retrying IMU init...");
-            initIMU();
-        }
-        if (!spo2Ready)
-        {
-            Serial.println("Retrying MAX30102 init...");
-            initSPO2();
-        }
-    }
+  Serial.printf("t=%lu ms | %s | ADC=%u | pin=%.3f V | AO~=%.3f V | Rs~=",
+                static_cast<unsigned long>(elapsedMs), SENSOR_NAME,
+                r.raw, r.adcVolts, r.reconstructedAoVolts);
+  if (isfinite(r.estimatedRsOhms)) {
+    Serial.printf("%.1f ohm\n", r.estimatedRsOhms);
+  } else {
+    Serial.println("NA (check RL/topology or enable calculation)");
+  }
 
-    // ---- PPG: 10 Hz, independent of IMU timing ----
-    // Reads via FIFO instead of getIR()/getRed() to avoid any
-    // possibility of blocking on I2C while waiting for fresh samples.
-    // FIFO is fully drained each tick (while, not if) - with no finger
-    // on the sensor the FIFO barely fills so this made no visible
-    // difference, but with a finger present the FIFO fills at 100 SPS
-    // while we only checked once per 100ms, so it backed up more and
-    // more every cycle, which is what was making things grind to a
-    // crawl / appear stuck once you placed your finger.
-    if (spo2Ready && (nowMs - lastPPGMs) >= 100)
-    {
-        lastPPGMs = nowMs;
-        max30102.check(); // pulls any available FIFO samples into the lib's buffer
-        while (max30102.available())
-        {
-            latestIR = max30102.getFIFOIR();
-            latestRED = max30102.getFIFORed();
-            max30102.nextSample();
-        }
-        // else: FIFO empty this cycle, keep previous latestIR/latestRED
-    }
+  File file = SD.open(LOG_FILE_PATH, FILE_APPEND);
+  if (!file) {
+    Serial.println("ERROR: Failed to open CSV for writing; check SD card/wiring.");
+    return;
+  }
 
-    uint32_t nowUs = micros();
-    if ((nowUs - lastSampleUs) < SAMPLE_INTERVAL_US)
-    {
-        return;
-    }
+  file.printf("%lu,%s,%d,%u,%lu,%.4f,",
+              static_cast<unsigned long>(elapsedMs), SENSOR_NAME,
+              SENSOR_ADC_PIN, r.raw,
+              static_cast<unsigned long>(r.adcMilliVolts),
+              r.reconstructedAoVolts);
+  if (isfinite(r.estimatedRsOhms)) {
+    file.printf("%.3f\n", r.estimatedRsOhms);
+  } else {
+    file.println("NA");
+  }
+  file.flush();
+  file.close();
+}
 
-    // Bounded catch-up scheduler: if we've fallen behind by more than
-    // MAX_CATCHUP_INTERVALS worth of samples (e.g. due to a BLE stall),
-    // snap forward instead of unbounded incrementing, which would
-    // otherwise fire a burst of back-to-back iterations to "catch up".
-    uint32_t elapsed = nowUs - lastSampleUs;
-    uint32_t intervalsElapsed = elapsed / SAMPLE_INTERVAL_US;
-    if (intervalsElapsed > MAX_CATCHUP_INTERVALS)
-    {
-        intervalsElapsed = MAX_CATCHUP_INTERVALS;
-    }
-    lastSampleUs += intervalsElapsed * SAMPLE_INTERVAL_US;
+void setup() {
+  Serial.begin(115200);
+  delay(800);
+  Serial.println();
+  Serial.println("MQ sensor SD logger starting...");
 
-    float ax_f = 0, ay_f = 0, az_f = 0, gx_f = 0, gy_f = 0, gz_f = 0;
-    if (imuReady)
-    {
-        ax_f = imu.readFloatAccelX();
-        ay_f = imu.readFloatAccelY();
-        az_f = imu.readFloatAccelZ();
-        gx_f = imu.readFloatGyroX();
-        gy_f = imu.readFloatGyroY();
-        gz_f = imu.readFloatGyroZ();
-    }
+  analogReadResolution(12);  // Raw ADC values nominally range from 0 to 4095
+  analogSetPinAttenuation(SENSOR_ADC_PIN, ADC_11db);
+  pinMode(SENSOR_ADC_PIN, INPUT);
 
-    if (batchIndex == 0)
-    {
-        packet.header.version = 1;
-        packet.header.flags = 0;
-        packet.header.reserved = 0;
-        packet.header.timestamp_us = micros();
-    }
+  SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  if (!SD.begin(SD_CS_PIN, SPI, 4000000)) {
+    Serial.println("ERROR: SD card initialization failed.");
+    Serial.println("Check FAT32 format, SD module voltage/logic compatibility, CS and SPI wiring.");
+    while (true) delay(1000);
+  }
 
-    packet.samples[batchIndex].ax =
-        (int16_t)(ax_f * 8192.0f);
-    packet.samples[batchIndex].ay =
-        (int16_t)(ay_f * 8192.0f);
-    packet.samples[batchIndex].az =
-        (int16_t)(az_f * 8192.0f);
-    packet.samples[batchIndex].gx =
-        (int16_t)(gx_f * 131.0f);
-    packet.samples[batchIndex].gy =
-        (int16_t)(gy_f * 131.0f);
-    packet.samples[batchIndex].gz =
-        (int16_t)(gz_f * 131.0f);
+  Serial.printf("SD card initialized; size = %llu MB\n",
+                SD.cardSize() / (1024ULL * 1024ULL));
 
-    packet.samples[batchIndex].ir = latestIR;
-    packet.samples[batchIndex].red = latestRED;
+  if (!openLogAndWriteHeaderIfNeeded()) {
+    while (true) delay(1000);
+  }
 
-    batchIndex++;
-    sampleCounter++;
+  Serial.printf("Logging to %s once every %lu ms. Open Serial Monitor at 115200 baud.\n",
+                LOG_FILE_PATH, static_cast<unsigned long>(LOG_INTERVAL_MS));
+  Serial.println("Power-cycle elapsed_ms restarts at zero; previous records are appended.");
+}
 
-    if (batchIndex >= BATCH_SIZE)
-    {
-        if (Bluefruit.connected())
-        {
-            uint16_t result = imuChar.notify(
-                (uint8_t*)&packet,
-                sizeof(packet)
-            );
-            (void)result; // notify() return value checked; no action needed on failure, next batch will simply retry
-        }
-        batchIndex = 0;
-    }
-
-    if (millis() - lastRateReport >= 1000)
-    {
-        Serial.print("RATE=");
-        Serial.print(sampleCounter);
-        Serial.print(" IR=");
-        Serial.print(latestIR);
-        Serial.print(" RED=");
-        Serial.print(latestRED);
-        Serial.print(" BLE=");
-        Serial.println(Bluefruit.connected() ? 1 : 0);
-        sampleCounter = 0;
-        lastRateReport = millis();
-    }
+void loop() {
+  const uint32_t now = millis();
+  if (now - lastLogMs >= LOG_INTERVAL_MS) {
+    lastLogMs = now;
+    logOneSample(now);
+  }
 }

@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ParkinSense — Independent Engineering Audit</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  html { font-size: 10.5pt; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #14181d; line-height: 1.45; margin: 0; }
+  h1 { font-size: 24pt; margin: 0 0 4pt 0; letter-spacing: -0.4pt; }
+  h2 { font-size: 15pt; margin: 26pt 0 8pt 0; padding-bottom: 4pt; border-bottom: 1.5px solid #14181d; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 16pt 0 5pt 0; page-break-after: avoid; }
+  h4 { font-size: 10.5pt; margin: 12pt 0 4pt 0; page-break-after: avoid; }
+  p { margin: 0 0 7pt 0; }
+  ul, ol { margin: 0 0 8pt 0; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.8pt; background: #f2f4f6; padding: 0.5pt 3pt; border-radius: 2px; }
+  pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.4pt; background: #f7f8fa; border-left: 2.5px solid #b8c0c8; padding: 7pt 9pt; margin: 7pt 0; overflow-x: auto; line-height: 1.35; page-break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0 12pt 0; font-size: 8.8pt; page-break-inside: avoid; }
+  th { background: #14181d; color: #fff; text-align: left; padding: 5pt 6pt; font-weight: 600; }
+  td { border-bottom: 0.5px solid #d5dae0; padding: 4.5pt 6pt; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  .subtitle { font-size: 11pt; color: #55606b; margin: 0 0 2pt 0; }
+  .meta { font-size: 8.8pt; color: #7b858f; margin: 0 0 18pt 0; }
+  .rule { height: 3px; background: #14181d; margin: 10pt 0 14pt 0; }
+  .finding { border: 0.75px solid #d5dae0; border-left-width: 4px; padding: 9pt 11pt; margin: 11pt 0; page-break-inside: avoid; border-radius: 0 3px 3px 0; }
+  .p0 { border-left-color: #b3261e; background: #fdf6f5; }
+  .p1 { border-left-color: #b5651d; background: #fdfaf5; }
+  .p2 { border-left-color: #5b6770; background: #fafbfc; }
+  .finding h4 { margin-top: 0; }
+  .tag { display: inline-block; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.6pt; padding: 1.5pt 5pt; border-radius: 2px; color: #fff; vertical-align: 2pt; margin-right: 5pt; }
+  .tag-p0 { background: #b3261e; } .tag-p1 { background: #b5651d; } .tag-p2 { background: #5b6770; }
+  .loc { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.2pt; color: #55606b; display: block; margin: 4pt 0 6pt 0; }
+  .score { font-weight: 700; text-align: center; white-space: nowrap; }
+  .s-bad { color: #b3261e; } .s-mid { color: #b5651d; } .s-ok { color: #1e6b3a; }
+  .callout { background: #f2f4f6; border: 0.75px solid #d5dae0; padding: 9pt 11pt; margin: 10pt 0; border-radius: 3px; page-break-inside: avoid; }
+  .pb { page-break-before: always; }
+  .note { font-size: 8.8pt; color: #55606b; font-style: italic; }
+  #pdfbtn { position: fixed; top: 16px; right: 16px; z-index: 999; background: #14181d; color: #fff;
+            border: none; border-radius: 5px; padding: 11px 17px; font: 600 13px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+            cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28); }
+  #pdfbtn:hover { background: #2c343d; }
+  #pdfbtn small { display: block; font-weight: 400; font-size: 10px; opacity: .72; margin-top: 3px; }
+  @media print { #pdfbtn { display: none !important; } }
+  .kv { font-size: 8.8pt; }
+  .kv td:first-child { width: 26%; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<button id="pdfbtn" onclick="window.print()">Save as PDF<small>then choose &ldquo;Save as PDF&rdquo;</small></button>
+
+<h1>ParkinSense</h1>
+<p class="subtitle">Independent Engineering Audit — Python Runtime, DSP Pipelines &amp; nRF52840 Firmware</p>
+<p class="meta">Prepared for Pranshu Kumar &nbsp;·&nbsp; Branch <span class="mono">develop</span> &nbsp;·&nbsp; 7 August 2026 &nbsp;·&nbsp; Report only — no code was modified</p>
+<div class="rule"></div>
+
+<h2>1. Executive Summary</h2>
+
+<p>ParkinSense is a genuinely ambitious piece of engineering. The module boundaries are sensible, the naming is disciplined, and <span class="mono">ppg/algorithms.py</span> in particular contains signal-processing work that is well above the level normally seen in an undergraduate or hobbyist wearable project — the ratio-of-ratios derivation, the beat-morphology scorer, and the lock state machine are all carefully reasoned and unusually well documented.</p>
+
+<p>The problem is that most of that quality lives in modules that the running system either does not reach, or reaches under conditions that invalidate their assumptions. This audit found <strong>four defects severe enough to mean that several headline biomarkers are unlikely to be producing correct values on real hardware today</strong>, plus a broad class of documentation claims that the code does not support.</p>
+
+<p>The good news is that the four critical defects are all narrow and localised. None of them require architectural redesign. Three are configuration or call-site mistakes fixable in under fifty lines; the fourth is a scheduling change in one function.</p>
+
+<h3>The four critical findings</h3>
+
+<ol>
+  <li><strong>The entire analysis pipeline executes once per sample (104 Hz), not once per window.</strong> Every stateful temporal component in the system — the hysteresis state machine, the persistence counters, the PPG finger debounce, the HR outlier hold — was designed around one call per analysis window and is receiving roughly 104 calls per second instead. Their time constants are therefore wrong by a factor of ~400, and the CPU cost is roughly two orders of magnitude higher than necessary.</li>
+  <li><strong>The PPG sample-rate contract is broken at three points in a row.</strong> The firmware delivers ~10 unique PPG samples per second, zero-order-holds them into 104 Hz packet slots, and the runtime then tells <span class="mono">PPGProcessor</span> the rate is 50 Hz. The arithmetic predicts that heart rate returns <span class="mono">None</span> for any true resting rate below about 94 BPM — which is exactly the symptom the README's own troubleshooting table documents as a user error.</li>
+  <li><strong>Gyroscope and accelerometer samples can silently overflow int16 on the wire.</strong> The IMU range settings are assigned after <span class="mono">imu.begin()</span> and therefore never applied, so the sensor runs at ±2000 dps / ±16 g while the packing arithmetic assumes ±250 dps / ±4 g. Ordinary voluntary wrist motion exceeds 250 dps and wraps around — injecting large false transients into the primary tremor signal.</li>
+  <li><strong>The advertised deep-sleep state does not sleep.</strong> There is no power-management call of any kind in the firmware. The "sleep" path is a <span class="mono">delay(10); return;</span> loop with BLE still advertising and the MAX30102 LEDs still driven. The microamp figure in the README is not achievable from this code.</li>
+</ol>
+
+<div class="callout">
+<strong>Framing for the paper.</strong> The most valuable thing in this audit is not the bug list — it is that several claims in the README describe modules that exist but are not reached by the running system (the temporal validator, the tremor state machine, motion-aware PPG confidence, the advanced PPG peak detector). An IEEE reviewer who reads the repository alongside the paper will find these. Section 7 tabulates them so they can be either wired up or reworded before submission.
+</div>
+
+<h3>Subsystem ratings</h3>
+
+<table>
+<tr><th style="width:31%">Subsystem</th><th style="width:8%">Score</th><th>Basis</th></tr>
+<tr><td>PPG algorithms (<span class="mono">algorithms.py</span>, in isolation)</td><td class="score s-ok">8 / 10</td><td>Genuinely strong work — literature-anchored constants, honest scope notes, sound ratio-of-ratios derivation. Undermined only by what feeds it and by ~370 lines now unreachable from the HR path.</td></tr>
+<tr><td>Step counter</td><td class="score s-ok">7 / 10</td><td>Best-engineered module in the repo. Correct hysteresis, monotonic clock, clean reset lifecycle, honest confidence heuristics. Held back by a statistic mismatch and an O(n) inner loop.</td></tr>
+<tr><td>Feature extraction</td><td class="score s-mid">6 / 10</td><td>Correct Welch usage, but resolution is 0.41 Hz while frequency is reported to 0.01 Hz; entropy unnormalised; <span class="mono">peak_prominence</span> is not a prominence.</td></tr>
+<tr><td>Dashboard</td><td class="score s-mid">6 / 10</td><td>Clean file-based decoupling from the runtime — a good architectural decision. Two parallel implementations exist; documented biomarkers are missing from the UI.</td></tr>
+<tr><td>Motion DSP filters</td><td class="score s-mid">5 / 10</td><td>Band is 3.0–8.0 Hz, not the documented 4.0–6.5. Notch filter is unnecessary and numerically ill-conditioned. Gravity filter uses <span class="mono">ba</span> form at Wn≈0.0058.</td></tr>
+<tr><td>Firmware — acquisition &amp; BLE</td><td class="score s-mid">5 / 10</td><td>Bounded catch-up scheduler and FIFO drain fix show real care. Undone by unapplied sensor settings, six separate I2C reads per sample, and no anti-alias handling.</td></tr>
+<tr><td>Packet protocol &amp; timestamping</td><td class="score s-mid">5 / 10</td><td>Versioned header is the right instinct. Timestamps are nominal rather than measured, and <span class="mono">micros()</span> wraps every 71.6 min with no host-side unwrap.</td></tr>
+<tr><td>Tremor detector &amp; scoring</td><td class="score s-bad">4 / 10</td><td>Binary threshold sum with cliff edges; reported frequency is a 3-axis mean inconsistent with the selected best axis; confidence re-scores the same three inputs as the score and ignores amplitude entirely.</td></tr>
+<tr><td>Documentation accuracy</td><td class="score s-bad">4 / 10</td><td>Excellent structure and admirable transparency about limitations, but ~15 specific technical claims do not match the code.</td></tr>
+<tr><td>Runtime orchestration</td><td class="score s-bad">3 / 10</td><td>Per-sample invocation of the whole pipeline; module-level mutable globals; JSON rewrite and CSV flush at 104 Hz; file handle never closed on normal exit.</td></tr>
+<tr><td>Firmware — power management</td><td class="score s-bad">3 / 10</td><td>No power API is called anywhere. Sleep is a busy-poll; the radio and PPG LEDs stay live.</td></tr>
+<tr><td>Repository hygiene</td><td class="score s-bad">3 / 10</td><td>~40% of Python files are unreachable. Three near-identical broken BLE receivers, <span class="mono">detector/</span> vs <span class="mono">detectors/</span>, a committed <span class="mono">_backup.py</span>, generated artefacts in git.</td></tr>
+<tr><td>Cross-pipeline fusion</td><td class="score s-bad">2 / 10</td><td>Of the four fusion behaviours the README describes, one is implemented. The motion→PPG link is never called, and would miss on a key-format mismatch even if it were.</td></tr>
+<tr><td>Temporal validation</td><td class="score s-bad">2 / 10</td><td><span class="mono">TemporalSmoother</span> is never instantiated outside a test script; the state machine's output is computed and then discarded.</td></tr>
+<tr><td>Tests &amp; CI</td><td class="score s-bad">2 / 10</td><td>Zero assertions across all six test files. No <span class="mono">requirements.txt</span>, so CI cannot install numpy/scipy. The 2,842-line <span class="mono">algorithms.py</span> has no coverage at all.</td></tr>
+</table>
+
+<p class="note">Scores assess the code as it currently runs, not the ambition behind it. Several 4s and 5s would become 8s from small fixes, because the underlying design is sound.</p>
+
+<h2 class="pb">2. Scope and Method</h2>
+
+<table class="kv">
+<tr><td>Repository</td><td><span class="mono">/Users/pranshu/ParkinSense</span> — branch <span class="mono">develop</span>, HEAD at time of audit</td></tr>
+<tr><td>In scope</td><td>Python runtime and all signal-processing modules; Arduino/nRF52840 firmware (v3 and v4); packet protocol; dashboard; tests and CI; README technical claims</td></tr>
+<tr><td>Out of scope</td><td>Android companion application — <strong>the <span class="mono">Android/</span> directory does not exist on this branch</strong> (see 3.1). Also absent: <span class="mono">hardware/</span>, <span class="mono">research/</span>, <span class="mono">docs/images/</span>, <span class="mono">LICENSE</span>, <span class="mono">firmware/.../parksense_wearable_v3/</span> and <span class="mono">_v4/</span> as named in the README</td></tr>
+<tr><td>Method</td><td>Full manual read of every reachable source file; import-graph construction to establish reachability; hand-verification of filter coefficients, spectral resolution, packet sizes, and fixed-point ranges against the code as written</td></tr>
+<tr><td>Constraint honoured</td><td>No functionality was invented. Every finding cites a file and line. Where a conclusion is a prediction rather than an observation (i.e. it needs hardware to confirm), it is labelled as such with a stated test.</td></tr>
+</table>
+
+<h2>3. Architecture — As Built</h2>
+
+<h3>3.1 What is actually in this branch</h3>
+
+<p>The README documents a repository layout that this branch does not have. Confirmed present: <span class="mono">dashboard/python/</span> (49 Python files), <span class="mono">firmware/xiao_nrf52840/src/</span> (6 sketch directories), <span class="mono">tests/</span> (6 files), <span class="mono">docs/SRS/</span>, <span class="mono">data/metadata/</span>, <span class="mono">.github/workflows/</span>.</p>
+
+<p>Confirmed absent: <span class="mono">Android/</span>, <span class="mono">hardware/</span>, <span class="mono">research/</span>, <span class="mono">docs/images/</span> (every image the README embeds is a broken link), <span class="mono">LICENSE</span> (the README says "See the <span class="mono">LICENSE</span> file"), and the two firmware directories the Getting Started section instructs the reader to open — the actual directories are <span class="mono">parksense_ble_stream_v3/</span>, <span class="mono">parksense_wearable_v3/</span> and <span class="mono">parksense_ble_stream_optimized_v4/</span>.</p>
+
+<p>Anyone following the README's setup instructions on a fresh clone of <span class="mono">develop</span> will fail at the firmware step and again at the Android step. This is the first thing a reviewer or a prospective contributor will encounter.</p>
+
+<h3>3.2 The live execution path</h3>
+
+<p>Stripped to what actually runs, the system is considerably simpler than the README's four-layer diagram suggests:</p>
+
+<pre>nRF52840 firmware (parksense_ble_stream_v4.ino)
+  └─ 208-byte packet, 10 samples, ~10.4 notifications/s
+       │
+       ▼
+runtime_v2.py :: notification_handler
+  └─ per-packet: unpack header, then FOR EACH of 10 samples:
+       ├─ scale, append to six 416-deep deques
+       └─ if buffer full  ──► MotionPipeline.process()   ◄── runs 104×/second
+            ├─ GravityRemoval  ×3 axes   (filtfilt)
+            ├─ MotionContext.classify
+            ├─ NotchFilter + ButterworthBandpass ×3 axes (filtfilt ×6)
+            ├─ FeatureExtractor.extract ×3 axes (Welch ×3)
+            ├─ RuleInferenceEngine.predict
+            │    ├─ MultiAxisDetector.detect
+            │    ├─ ConfidenceEstimator.estimate   → overwrites detector confidence
+            │    └─ TremorStateMachine.update      → result DISCARDED downstream
+            └─ PPGProcessor.process(ir, red)       → motion_state NOT passed
+                 ├─ assess_finger_presence  (FFT)
+                 ├─ compute_signal_quality  (FFT)   ─┐ computed
+                 ├─ estimate_heart_rate             │ twice
+                 │    └─ compute_signal_quality ────┘ per call
+                 ├─ compute_hrv_metrics
+                 └─ estimate_spo2           (peak detection + FFT)
+       ├─ StepCounter.update(ax, ay, az, motion_state)   ◄── the one live fusion link
+       ├─ json.dump to realtime_metrics_v2.json          ◄── 104 file writes/second
+       ├─ writer.writerow + csv_file.flush()             ◄── 104 flushes/second
+       └─ 22-line console block                          ◄── 104 prints/second
+       │
+       ▼
+realtime_dashboard_v2.py — polls the JSON/CSV every 100 ms (correctly decoupled)</pre>
+
+<p>Two observations from the map itself. First, the file-based decoupling between runtime and dashboard is a genuinely good decision and should be kept — it is what makes replay and offline validation possible. Second, everything inside <span class="mono">MotionPipeline.process()</span> is stateless recomputation over a 4-second window, invoked 104 times per second on a window that has advanced by one sample. That single fact drives most of what follows.</p>
+
+<h2 class="pb">4. Critical Findings (P0)</h2>
+
+<div class="finding p0">
+<h4><span class="tag tag-p0">P0-1</span> The whole pipeline runs per-sample, invalidating every temporal component</h4>
+<span class="loc">runtime_v2.py:185–257 · state_machine.py:21–61 · temporal.py:13–37 · ppg_processor.py:144–151</span>
+
+<p>The decode loop iterates the ten samples in each packet, and the guard that gates analysis sits <em>inside</em> that loop:</p>
+
+<pre>for i in range(BATCH_SIZE):                     # runtime_v2.py:185
+    ...
+    if len(gx_buffer) == WINDOW_SIZE:           # runtime_v2.py:224
+        result = pipeline.process(...)          # runtime_v2.py:225</pre>
+
+<p>Because <span class="mono">gx_buffer</span> is a <span class="mono">deque(maxlen=416)</span>, once it has filled it stays full forever. The condition is true for every subsequent sample, so the full pipeline runs 104 times per second on a window that has advanced by a single sample — a 99.76% overlap between consecutive analyses.</p>
+
+<p><strong>Consequence 1 — every temporal design is degenerate.</strong> <span class="mono">TremorStateMachine</span> requires <span class="mono">high_count &gt;= 2</span> to leave <span class="mono">NO_TREMOR</span> and <span class="mono">&gt;= 4</span> to reach <span class="mono">CONFIRMED</span>. Those were clearly intended as "2 windows" and "4 windows" — 8 s and 16 s of evidence. At 104 calls/s they are 19 ms and 38 ms. The hysteresis the README presents as a core false-positive defence provides essentially no temporal filtering. The same applies to the PPG finger debounce and the HR outlier hold.</p>
+
+<p><strong>Consequence 2 — a latent lock-up in the state machine.</strong> Scores strictly between <span class="mono">LOW=55</span> and <span class="mono">HIGH=75</span> increment neither counter (state_machine.py:26–34). A score that settles at, say, 65 leaves both counters frozen at their last values, and the state never advances or decays. There is no timeout and no decay path. A session can sit in <span class="mono">CONFIRMED_TREMOR</span> indefinitely on a signal that no longer qualifies.</p>
+
+<p><strong>Consequence 3 — cost.</strong> Each call performs 9 <span class="mono">filtfilt</span> passes over 416 samples, 3 Welch PSDs, and a full PPG chain including 3–4 FFTs over 500 samples. Multiplied by 104/s this is roughly 100× more work than the analysis actually requires, on top of 104 JSON file rewrites and 104 <span class="mono">fsync</span>-inducing CSV flushes per second.</p>
+
+<p><strong>Recommended direction.</strong> Introduce a hop counter and analyse every N samples — N = 52 gives 2 Hz analysis with 50% window overlap, which is conventional for this kind of detector and preserves the temporal constants' intended meaning. Everything downstream then behaves as designed without touching any algorithm. This one change is the highest-leverage fix in the report.</p>
+</div>
+
+<div class="finding p0">
+<h4><span class="tag tag-p0">P0-2</span> PPG sample-rate contract is broken at three consecutive stages</h4>
+<span class="loc">parksense_ble_stream_v4.ino:114, 265–276, 328–329 · motion_pipeline.py:38 · ppg_processor.py:124–132 · algorithms.py:1817</span>
+
+<p>Three independent rate assumptions disagree, and they compound.</p>
+
+<p><strong>Stage 1 — the firmware decimates 100 SPS to 10 Hz by discarding.</strong> The MAX30102 is configured at 100 samples/second (<span class="mono">setup(0x1F, 1, 2, 100, 411, 4096)</span>, line 114). The PPG block runs on a 100 ms tick and drains the whole FIFO, but assigns rather than accumulates:</p>
+
+<pre>if (spo2Ready &amp;&amp; (nowMs - lastPPGMs) &gt;= 100) {   // line 265
+    max30102.check();
+    while (max30102.available()) {
+        latestIR  = max30102.getFIFOIR();          // overwritten each iteration
+        latestRED = max30102.getFIFORed();
+        max30102.nextSample();
+    }
+}</pre>
+
+<p>Roughly ten samples accumulate per tick and nine are thrown away. The effective PPG rate reaching the host is <strong>10 Hz</strong> — the code comment at line 80 says so explicitly ("runs at 10 Hz"), while the README states ~50 Hz throughout.</p>
+
+<p><strong>Stage 2 — zero-order hold into 104 Hz slots.</strong> Lines 328–329 write <span class="mono">latestIR</span>/<span class="mono">latestRED</span> into every IMU sample slot, so each unique PPG value is repeated about 10.4 times. A 500-sample buffer therefore contains roughly 48 distinct measurements, not 500.</p>
+
+<p><strong>Stage 3 — the runtime declares the wrong rate.</strong> <span class="mono">MotionPipeline.__init__</span> constructs <span class="mono">PPGProcessor()</span> with no arguments (motion_pipeline.py:38), taking the defaults <span class="mono">sample_rate=50, window_seconds=10</span>. But samples arrive at 104 Hz. So the "10-second" window is really 4.8 s, and — critically — every conversion from samples to seconds is wrong by a factor of 104/50 = 2.08.</p>
+
+<p><strong>The arithmetic.</strong> Heart rate is derived at algorithms.py:1817 as <span class="mono">rr_raw = np.diff(peaks) / fs</span> with <span class="mono">fs=50</span>. For a true 70 BPM the beat spacing is 0.857 s = 89 samples at the real 104 Hz, which the code reads as 89/50 = 1.78 s. The physiological-bounds filter at line 1819 accepts only 0.333–1.333 s, so <strong>every interval is rejected</strong>, <span class="mono">rr.size &lt; 2</span>, and the function returns <span class="mono">heart_rate: None</span>.</p>
+
+<p>Working the bound backwards: a value is reportable only when the true rate is between roughly 94 and 374 BPM, and it then reads about 48% of the true rate. That is precisely the behaviour the README's troubleshooting table records as user error — "Heart Rate stuck near None: hold still for the full 10 s buffer to fill" and "HRV always None". This is not a contact problem; the arithmetic cannot produce a resting heart rate.</p>
+
+<p class="note">Prediction, not observation — verify in about two minutes: log <span class="mono">len(self._ir_buffer)</span> and the <span class="mono">hr_debug</span> trace (<span class="mono">process(..., debug=True)</span> already exposes it) during a normal finger-on capture and check whether <span class="mono">rr_ms_before_filtering</span> clusters near 1800 ms rather than 850 ms. Also note that the README's sample output showing 71.4 BPM would require a true rate of ~148 BPM under this analysis.</p>
+
+<p><strong>Recommended direction.</strong> Three separable fixes: (a) accumulate the FIFO in the firmware instead of overwriting, and send the real PPG rate; (b) decide on one canonical PPG rate and pass it explicitly — <span class="mono">PPGProcessor(sample_rate=&lt;actual&gt;)</span> — rather than relying on a default; (c) add a startup assertion that compares measured arrival rate against the configured <span class="mono">fs</span> and refuses to run silently on a mismatch. A single wrong default should not be able to disable a headline biomarker in silence.</p>
+</div>
+
+<div class="finding p0">
+<h4><span class="tag tag-p0">P0-3</span> IMU range settings are never applied; gyro samples overflow int16 during normal motion</h4>
+<span class="loc">parksense_ble_stream_v4.ino:86–102, 315–326 · runtime_v2.py:206–212</span>
+
+<p>The sensor configuration is assigned <em>after</em> the driver has already been initialised:</p>
+
+<pre>if (imu.begin() != 0) { ... }
+else {
+    imu.settings.accelEnabled = 1;
+    imu.settings.gyroEnabled  = 1;
+    imu.settings.accelRange   = 4;      // never reaches the hardware
+    imu.settings.gyroRange    = 245;    // never reaches the hardware
+}</pre>
+
+<p>In the SparkFun LSM6DS3 driver, <span class="mono">begin()</span> is what writes <span class="mono">settings</span> into the device registers. Mutating the struct afterwards has no effect. The sensor therefore runs at the library defaults — ±16 g, ±2000 dps, and a 416 Hz output data rate.</p>
+
+<p>Meanwhile the packing arithmetic assumes the intended ranges:</p>
+
+<pre>packet.samples[i].gx = (int16_t)(gx_f * 131.0f);   // saturates at ±250 dps
+packet.samples[i].ax = (int16_t)(ax_f * 8192.0f);  // saturates at ±4 g</pre>
+
+<p>The scale factors round-trip correctly against the host (<span class="mono">runtime_v2.py:206–212</span> divides by the same constants), so quiet data is fine. The problem is the ceiling. <span class="mono">131 × 250 = 32,750</span>, just inside int16. Any gyro reading beyond ±250 dps wraps to the opposite sign. Ordinary voluntary wrist rotation routinely peaks in the 300–800 dps range — reaching for a cup, turning a door handle, gesturing while speaking.</p>
+
+<p><strong>Why this matters for the science.</strong> A wrap produces a full-scale sign discontinuity in the gyroscope trace. Fed through a 3–8 Hz band-pass, a step discontinuity rings at the filter's centre frequency — that is, it manufactures energy squarely inside the tremor band from a movement that is not tremor. The tremor detector's most important failure mode is false positives during voluntary motion, and this creates exactly that artefact. The <span class="mono">ACTIVE</span> motion-context veto will suppress many of these, but the <span class="mono">LOW MOTION</span> band will not.</p>
+
+<p><strong>Secondary effect — IMU aliasing.</strong> With settings unapplied, the sensor's ODR is 416 Hz and its internal anti-alias filter is configured for that bandwidth, while the firmware samples it at 104 Hz. Content between 52 Hz and 208 Hz folds down into 0–52 Hz, including into the tremor band. There is no decimation filter anywhere in the chain.</p>
+
+<p><strong>Recommended direction.</strong> Populate <span class="mono">imu.settings</span> before calling <span class="mono">begin()</span>, then either set the ODR to 104 Hz so no decimation is needed, or keep a higher ODR and add a proper decimation filter. Separately, add a saturation check around the int16 cast so that clipping is recorded in the packet <span class="mono">flags</span> byte (which is currently always zero) rather than being invisible — for a research platform, knowing a sample was clipped matters as much as the sample.</p>
+</div>
+
+<div class="finding p0">
+<h4><span class="tag tag-p0">P0-4</span> "Deep sleep" is a busy-poll; the microamp claim is not supported by this firmware</h4>
+<span class="loc">parksense_ble_stream_v4.ino:196–227, 279–282 · README "Battery Optimization" and "Performance"</span>
+
+<p>A search across the whole firmware tree for power-management calls — <span class="mono">sd_power_system_off</span>, <span class="mono">NRF_POWER-&gt;SYSTEMOFF</span>, <span class="mono">waitForEvent</span>, <span class="mono">__WFE</span>, <span class="mono">suspendLoop</span>, <span class="mono">shutDown</span>, <span class="mono">setLEDMode</span> — returns no matches. Not one. The sleep path is:</p>
+
+<pre>if (!systemActive) {
+    if (spo2Ready &amp;&amp; (nowMs - lastFingerCheckMs) &gt;= FINGER_POLL_INTERVAL_MS) {
+        ... threshold IR, debounce ...
+    }
+    delay(10);
+    return;
+}</pre>
+
+<p>In this state the CPU does idle inside <span class="mono">delay()</span>, but three things keep drawing current: BLE advertising continues (<span class="mono">restartOnDisconnect(true)</span>, <span class="mono">Advertising.start(0)</span> — never stopped), the MAX30102 keeps running at 100 SPS with both LEDs driven at <span class="mono">0x1F</span>, and the I2C bus is polled four times a second. The MAX30102 alone in this configuration draws on the order of milliamps. <strong>Microamp-range current is not reachable from this code path</strong>, and consequently neither is the ~100-hour runtime figure derived from it.</p>
+
+<p>The active path has a separate issue. Line 279 returns immediately when the sample interval has not elapsed, so <span class="mono">loop()</span> spins at full speed continuously — the Cortex-M4 never enters a wait state between the 104 Hz samples, which is where the bulk of the ~7 mA active figure comes from. On an nRF52840 with the SoftDevice, yielding to <span class="mono">sd_app_evt_wait()</span> in that branch is a small change with a large effect.</p>
+
+<p><strong>Recommended direction.</strong> In the sleep path: call <span class="mono">max30102.shutDown()</span> (or drop to a 1 Hz proximity mode), stop advertising, and use a low-power timer to schedule the finger poll rather than a 10 ms spin. In the active path: yield to the SoftDevice's wait-for-event instead of returning early from <span class="mono">loop()</span>. Then re-measure on the Power Profiler Kit and quote the new numbers. Until then, the README's two power figures should be softened, since they are the most falsifiable quantitative claims in the document.</p>
+</div>
+
+<h2 class="pb">5. High-Priority Findings (P1)</h2>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-5</span> Motion-aware PPG confidence — the headline fusion feature — is never invoked</h4>
+<span class="loc">motion_pipeline.py:89–92 · ppg_processor.py:101–106, 177–182, 375</span>
+
+<p><span class="mono">PPGProcessor.process</span> accepts a <span class="mono">motion_state</span> argument and applies <span class="mono">MOTION_CONFIDENCE_MULTIPLIERS</span> to the HR confidence. The single call site omits it:</p>
+
+<pre>ppg = self.ppg.process(ir, red)     # motion_pipeline.py:89 — no motion_state</pre>
+
+<p>The multiplier lookup therefore resolves to <span class="mono">.get(None, 1.0)</span> — always 1.0, always a no-op. This is the mechanism behind two README claims: "Motion-aware Confidence: HR confidence is discounted according to the Motion Pipeline's reported activity state," and the Cross-Pipeline Fusion bullet "Motion context reduces confidence in PPG estimates during heavy movement."</p>
+
+<p>There is a second defect hiding behind the first. Even once the argument is passed, the dictionary keys are <span class="mono">"LOW_MOTION"</span> with an underscore (ppg_processor.py:103), while <span class="mono">MotionContext</span> emits <span class="mono">"LOW MOTION"</span> with a space (motion_context.py:41). The lookup would miss and fall through to 1.0. This is the identical failure mode that <span class="mono">StepCounter</span>'s comment at lines 279–285 records as having been diagnosed and fixed once already — string-keyed cross-module contracts are silently failing in more than one place.</p>
+
+<p><strong>Recommended direction.</strong> Pass the state through, and replace the raw strings with an enum or module-level constants shared by producer and consumer so a mismatch becomes an import error rather than a silent 1.0.</p>
+</div>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-6</span> The temporal validator is dead code; the state machine's output is discarded</h4>
+<span class="loc">temporal.py (whole file) · rule_engine.py:49–55 · runtime_v2.py:263–267</span>
+
+<p>The README describes a "Temporal Validator — requires 5 positive windows out of a rolling 10 before confirming tremor." That is <span class="mono">TemporalSmoother</span> in <span class="mono">detector/temporal.py</span>, and an import-graph search finds exactly one importer: <span class="mono">tests/test_temporal.py</span>. It is never constructed in the runtime. <strong>No 5-of-10 validation occurs anywhere in the live path.</strong></p>
+
+<p>The state machine fares slightly better but ends the same way. <span class="mono">RuleInferenceEngine</span> does call it and stores the result — <span class="mono">detector["state"] = self.state_machine.update(...)</span> — but the runtime never reads that key. The published classification comes from a different quantity entirely:</p>
+
+<pre>"classification": "TREMOR" if analysis["tremor"] else "NO TREMOR"   # runtime_v2.py:263</pre>
+
+<p>where <span class="mono">analysis["tremor"]</span> is the raw <span class="mono">score &gt;= 80</span> test from multiaxis_detector.py:96. So the system publishes an instantaneous threshold crossing, computes hysteresis alongside it, and throws the hysteresis away. Three separate thresholds coexist — 80 for the boolean, 75 and 55 for the state machine — with only the first having any effect.</p>
+
+<p><strong>Recommended direction.</strong> Decide which is authoritative. If the state machine is meant to be the output (it should be — that is the whole point of hysteresis in a clinical-adjacent detector), publish <span class="mono">CONFIRMED_TREMOR</span> as the classification and demote the raw boolean to a diagnostic field. Then either wire <span class="mono">TemporalSmoother</span> in or delete it and remove the claim.</p>
+</div>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-7</span> PPG decimation without an anti-aliasing filter corrupts the SQI harmonic ratio</h4>
+<span class="loc">parksense_ble_stream_v4.ino:269–274 · algorithms.py:811–824</span>
+
+<p>Reducing 100 SPS to 10 Hz by keeping the newest FIFO sample is decimation without a low-pass stage — a textbook aliasing violation. Everything above the new 5 Hz Nyquist folds back into the band below it, including motion transients and LED-driver ripple, landing directly on top of the cardiac band.</p>
+
+<p>The concrete casualty is <span class="mono">harmonic_ratio</span>, one of the six components of the Signal Quality Index. It integrates power at 2f₀ and 3f₀ (algorithms.py:822–823). For a resting 1.2 Hz fundamental those sit at 2.4 Hz and 3.6 Hz — still below Nyquist. But at 100 BPM (1.67 Hz) the third harmonic is at 5.0 Hz, exactly at Nyquist, and above that it aliases. So the SQI's harmonic term is measuring folded energy for any elevated heart rate, and the SQI feeds HR confidence, sensor status, and the SpO₂ gate.</p>
+
+<p><strong>Recommended direction.</strong> Average the FIFO samples in the firmware rather than discarding them — a 10-sample box average is a crude but effective anti-alias filter, costs almost nothing, and improves SNR by roughly √10. Better still, use the MAX30102's own <span class="mono">sampleAverage</span> hardware setting (currently 1) to do it in the sensor.</p>
+</div>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-8</span> Reported tremor frequency is a three-axis mean, inconsistent with the selected best axis</h4>
+<span class="loc">multiaxis_detector.py:39–52, 130 · feature_extractor.py:57–67</span>
+
+<p>The detector picks a <span class="mono">best_axis</span> by maximum band ratio, but reports the frequency as an unweighted mean across all three axes:</p>
+
+<pre>mean_freq  = np.mean(freqs)                          # line 39
+best_axis  = ["gx","gy","gz"][np.argmax(powers)]      # line 45
+...
+"frequency": mean_freq,                              # line 130 — not the best axis
+</pre>
+
+<p>If tremor is genuinely present on <span class="mono">gy</span> at 5.2 Hz while <span class="mono">gx</span> and <span class="mono">gz</span> carry low-amplitude broadband noise whose spectral peaks land at, say, 3.1 Hz and 7.6 Hz, the reported frequency is 5.3 Hz by coincidence — and with a different noise realisation it could be 4.1 Hz. The value published as "Tremor Frequency — dominant oscillation" is not the dominant oscillation of the axis the system just identified as dominant.</p>
+
+<p>The same statistic drives <span class="mono">axis_agreement = 1 - freq_std/2</span>, which contributes 20 points to the score and 25 to the confidence. Because Welch's resolution here is 104/256 = 0.406 Hz, <span class="mono">freq_std</span> is quantised in steps of roughly 0.19 Hz, and clearing <span class="mono">axis_agreement &gt; 0.85</span> requires all three axes to land within a single FFT bin. That is a brittle gate on a quantised quantity.</p>
+
+<p><strong>Recommended direction.</strong> Report the best axis's own dominant frequency, or a band-power-weighted mean across axes. Compute agreement only over axes whose band ratio clears a floor, so noise axes cannot vote. And apply parabolic interpolation to the PSD peak — three lines of code that recover roughly an order of magnitude of frequency precision and would justify the two-decimal reporting the system already does.</p>
+</div>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-9</span> Zero-phase filtering applied to a sliding real-time window puts the largest transient on the newest sample</h4>
+<span class="loc">gravity.py:26 · notch.py:34 · bandpass.py:41 · motion_pipeline.py:60–72</span>
+
+<p>All three motion filters use <span class="mono">filtfilt</span>, which is non-causal: it filters forwards then backwards, and pads the signal by reflection at both ends. That is the right tool for offline analysis of a complete recording. Applied to a sliding window in real time it has two consequences that matter here.</p>
+
+<p>First, the filter is stateless across calls — each invocation re-pads and re-filters from scratch, so the reflection artefact at the window's trailing edge is regenerated every time. The trailing edge is the newest data, which is exactly what a real-time detector cares most about. Second, <span class="mono">filtfilt</span> on a 4th-order Butterworth yields an effective 8th-order magnitude response, so the actual band edges are sharper than the nominal design — worth stating precisely if the filter order appears in the paper.</p>
+
+<p><strong>Recommended direction.</strong> Either switch to a stateful causal <span class="mono">sosfilt</span> with retained <span class="mono">zi</span> (correct for streaming, at the cost of a known phase delay that can be compensated), or keep <span class="mono">filtfilt</span> but extract features from the window's centre rather than its edge, accepting a half-window latency. Both are defensible; the current arrangement gets the drawbacks of both.</p>
+</div>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-10</span> Packet timestamps wrap every 71.6 minutes with no host-side unwrap</h4>
+<span class="loc">parksense_ble_stream_v4.ino:41, 312 · runtime_v2.py:42, 201–204</span>
+
+<p><span class="mono">packet.header.timestamp_us</span> is a <span class="mono">uint32_t</span> filled from <span class="mono">micros()</span>. It overflows at 2³² µs = 4,294.97 s = <strong>71 minutes 35 seconds</strong>. The host unpacks it as <span class="mono">"I"</span> and does straightforward arithmetic:</p>
+
+<pre>timestamp_us = packet_timestamp_us + i * SAMPLE_PERIOD_US   # runtime_v2.py:201</pre>
+
+<p>There is no wrap detection. Over the ~100-hour continuous session the README targets, the counter wraps 84 times, and every wrap writes a ~4,295-second backwards jump into <span class="mono">sample_timestamp_us</span> in the CSV. The dashboard's rolling 60-second window is computed from this column, and so is any downstream analysis of a long capture — which is precisely the use case a longitudinal monitoring platform exists to serve.</p>
+
+<p>A related, smaller point: the timestamp is captured once per batch at <span class="mono">batchIndex == 0</span>, and per-sample times are reconstructed as nominal multiples of <span class="mono">SAMPLE_PERIOD_US</span>. Because the catch-up scheduler at line 294 can advance <span class="mono">lastSampleUs</span> by several intervals at once, the reconstructed times are the schedule's intent, not the acquisition's reality. For a platform that claims temporally aligned multi-modal data, that distinction is worth documenting.</p>
+
+<p><strong>Recommended direction.</strong> Track wraps host-side with a 64-bit accumulator (detect when the new value is less than the previous and add 2³²), or promote the header field to 64-bit and bump the packet version — the versioned header exists for exactly this. Since the header already has two reserved bytes, extending it is cheap.</p>
+</div>
+
+<div class="finding p1">
+<h4><span class="tag tag-p1">P1-11</span> The test suite contains no assertions and CI cannot run it</h4>
+<span class="loc">tests/*.py (all six files) · .github/workflows/python-app.yml:26–39</span>
+
+<p>All six files under <span class="mono">tests/</span> are print-scripts. A search for <span class="mono">assert</span> across the directory returns <strong>zero occurrences</strong>. <span class="mono">test_state_machine.py</span> feeds eleven scores through the state machine and prints the result; nothing checks the result. The files execute at pytest collection time, so they function as accidental import smoke-tests, but no behavioural regression can ever fail them.</p>
+
+<p>The CI workflow compounds this. It runs <span class="mono">pip install -r requirements.txt</span> guarded by <span class="mono">if [ -f requirements.txt ]</span> — and no <span class="mono">requirements.txt</span> exists in the repository, so numpy and scipy are never installed and every test module fails at import. Separately, <span class="mono">pytest</span> exits with code 5 when it collects no test functions, which fails the job. Either way the workflow provides no verification.</p>
+
+<p>Coverage is inverted relative to risk. The 2,842-line <span class="mono">ppg/algorithms.py</span> — by far the largest, most numerically delicate module — has no test file at all, as do <span class="mono">step_counter.py</span>, <span class="mono">ppg_processor.py</span>, <span class="mono">motion_context.py</span>, <span class="mono">multiaxis_detector.py</span> and <span class="mono">feature_extractor.py</span>. The one module with a dedicated test, <span class="mono">temporal.py</span>, is dead code.</p>
+
+<p><strong>Recommended direction.</strong> Add <span class="mono">requirements.txt</span> and convert the six scripts into <span class="mono">def test_*()</span> functions with assertions. Then prioritise synthetic-signal tests over unit tests of internals: feed a known 5 Hz sinusoid at known amplitude and assert the detector's reported frequency and score; feed a synthetic PPG waveform at a known BPM and assert the estimate. Those tests would have caught P0-2 immediately, and they are the tests a reviewer would want to see referenced in a validation section.</p>
+</div>
+
+<h2 class="pb">6. Medium-Priority Findings (P2)</h2>
+
+<h3>6.1 Signal processing</h3>
+
+<table>
+<tr><th style="width:20%">Finding</th><th style="width:18%">Location</th><th>Detail and suggested direction</th></tr>
+
+<tr><td><strong>The 50 Hz notch filter is unnecessary and numerically fragile</strong></td><td>notch.py:21–25<br>motion_pipeline.py:42</td><td>Three reasons to remove it. (a) It is applied only to gyroscope data — a battery-powered MEMS sensor with no galvanic path to mains cannot pick up 50 Hz hum. (b) It runs <em>before</em> a 3–8 Hz band-pass that already attenuates 50 Hz by well over 100 dB, so it removes nothing the next stage would not. (c) At fs=104 the Nyquist is 52 Hz, so a 50 Hz notch sits at 0.96×Nyquist where the bilinear transform's frequency warping is extreme and the <span class="mono">ba</span> coefficients are ill-conditioned. Deleting it removes a filter pass per axis per call and one paragraph of unsupportable claim from the paper.</td></tr>
+
+<tr><td><strong>Gravity filter uses <span class="mono">ba</span> form at a very low normalised frequency</strong></td><td>gravity.py:18–22</td><td><span class="mono">Wn = 0.3/52 = 0.00577</span>. SciPy's own documentation warns that transfer-function output is numerically unstable for low-frequency designs and recommends <span class="mono">output='sos'</span>. At order 2 this is borderline rather than broken, but it is free to fix: <span class="mono">butter(2, Wn, 'low', output='sos')</span> with <span class="mono">sosfiltfilt</span>.</td></tr>
+
+<tr><td><strong>Reported frequency precision exceeds spectral resolution by ~40×</strong></td><td>feature_extractor.py:57–67<br>runtime_v2.py:276–281</td><td>Welch with <span class="mono">nperseg=256</span> at fs=104 gives bin spacing 0.406 Hz, so <span class="mono">dominant_frequency</span> can only take values 0, 0.406, 0.813, … The runtime rounds it to two decimals and the README's sample output shows 5.18 Hz — a value the estimator cannot produce. Either report to one decimal with the resolution stated, or add quadratic peak interpolation and earn the precision.</td></tr>
+
+<tr><td><strong><span class="mono">dominant_frequency</span> is a global argmax, not band-constrained</strong></td><td>feature_extractor.py:63</td><td><span class="mono">np.argmax(psd)</span> searches the entire spectrum including the DC bin. The band-pass suppresses out-of-band content so this rarely bites, but on a low-amplitude window residual leakage can win. Restrict the search to the tremor band, which is what the value is used for.</td></tr>
+
+<tr><td><strong>Spectral entropy is unnormalised and window-size dependent</strong></td><td>feature_extractor.py:106–110</td><td><span class="mono">scipy.stats.entropy</span> returns nats over however many bins exist, so the value is not comparable across window lengths or sample rates and has no interpretable scale. Divide by <span class="mono">log(N_bins)</span> for a 0–1 measure — note that <span class="mono">algorithms.py:798–801</span> already does exactly this correctly, so the two modules disagree on the definition of the same feature.</td></tr>
+
+<tr><td><strong><span class="mono">peak_prominence</span> is not a prominence</strong></td><td>feature_extractor.py:128–142</td><td><span class="mono">find_peaks</span> is called and its properties dict discarded (<span class="mono">peaks, _ = ...</span>); the field is then filled with <span class="mono">np.max(psd[peaks])</span> — the tallest peak's height. Prominence and height are different quantities. Either request <span class="mono">prominence=</span> from <span class="mono">find_peaks</span> and use the returned values, or rename the field to <span class="mono">max_peak_power</span>.</td></tr>
+
+<tr><td><strong>Motion context takes the magnitude of already-gravity-removed axes</strong></td><td>motion_pipeline.py:60–68<br>motion_context.py:25–33</td><td>Each axis is gravity-removed, then the vector magnitude is taken, then the mean is subtracted. Because <span class="mono">√(x²+y²+z²)</span> of zero-mean signals is strictly non-negative, this is a rectification followed by a de-mean — a nonlinear operation that folds negative excursions and roughly halves effective sensitivity. The conventional formulation computes the magnitude of the <em>raw</em> accelerometer vector and then removes the 1 g baseline. The thresholds 0.03/0.20 g were presumably tuned against the current behaviour, so changing this requires re-tuning them.</td></tr>
+
+<tr><td><strong>Confidence re-scores the same three inputs as the score</strong></td><td>confidence.py:11–73<br>multiaxis_detector.py:77–96</td><td><span class="mono">ConfidenceEstimator</span> consumes <span class="mono">frequency_std</span>, <span class="mono">band_ratio</span> and <span class="mono">axis_agreement</span> — the identical features the score is built from. It is therefore a monotone re-expression of the score, not independent evidence, and can never meaningfully disagree with it. Most importantly it ignores <strong>amplitude entirely</strong>: a 0.81 dps tremor scraping past the gate and a 40 dps tremor receive the same confidence. Amplitude relative to the noise floor is the single most informative confidence input available and it is unused.</td></tr>
+
+<tr><td><strong>Score is a sum of binary thresholds with cliff-edge behaviour</strong></td><td>multiaxis_detector.py:77–96</td><td>35 + 30 + 20 + 20 with a detection bar of 80 means tremor requires the frequency gate <em>and</em> the band-ratio gate <em>and</em> at least one of agreement/dominance — an AND of three conditions expressed as arithmetic. A band ratio of 0.1799 versus 0.1801 swings the score by 30 points. Graded membership functions (sigmoid or trapezoidal) over the same features would give a continuous, far more stable score with no change to the feature set, and would read considerably better in a paper than four hard-coded integers.</td></tr>
+
+<tr><td><strong>The detector's own confidence computation is dead</strong></td><td>multiaxis_detector.py:116–118<br>rule_engine.py:47</td><td><span class="mono">confidence = int(score * axis_agreement)</span> is computed and returned, then unconditionally overwritten one call up the stack. Delete it.</td></tr>
+
+<tr><td><strong><span class="mono">rest_index</span> is duplicated verbatim</strong></td><td>multiaxis_detector.py:71–74, 146–149</td><td>The same expression appears in both the early-return and normal-return dicts. Two places to forget when the 0.20 constant changes.</td></tr>
+
+<tr><td><strong>Confidence penalties are applied after the clamp</strong></td><td>confidence.py:55–71</td><td>The value is clamped to 100 and only then multiplied by the 0.5 penalties, so a raw 120 and a raw 200 both become 50. Not a correctness bug, but the ordering makes the penalty non-monotonic in the underlying evidence.</td></tr>
+</table>
+
+<h3>6.2 Step counter</h3>
+
+<p>This module is the strongest in the repository and the notes below are refinements rather than defects.</p>
+
+<table>
+<tr><th style="width:20%">Finding</th><th style="width:18%">Location</th><th>Detail and suggested direction</th></tr>
+
+<tr><td><strong>Threshold statistics are computed on rectified data but compared against signed data</strong></td><td>step_counter.py:271–273, 306</td><td><span class="mono">_update_adaptive_threshold(filtered_abs)</span> builds <span class="mono">mean + 0.7·std</span> from <span class="mono">|x|</span>, but the trigger test is <span class="mono">filtered &gt; self._threshold</span> on the signed value. Since <span class="mono">mean(|x|) &gt; 0</span> always, the threshold carries a positive bias unrelated to the signal's positive excursions, and <span class="mono">k = 0.7</span> loses its interpretation as a standard-deviation multiplier. Using signed statistics — or documenting the rectified formulation explicitly — would make the constant meaningful.</td></tr>
+
+<tr><td><strong>O(n) mean and standard deviation recomputed every sample in pure Python</strong></td><td>step_counter.py:186–189</td><td>Two generator expressions over a 208-element deque, 104 times per second — roughly 43,000 float operations per second for a quantity computable in O(1) with running sums of x and x². The cleanest fix is Welford's algorithm or a rolling sum pair.</td></tr>
+
+<tr><td><strong>Fixed step length limits distance accuracy</strong></td><td>step_counter.py:78, 321</td><td><span class="mono">step_length_m=0.75</span> is a constructor parameter (good) but never calibrated, and stride length in reality scales with cadence. A cadence-dependent model — the Weinberg estimator, or a simple linear cadence term — is standard in the pedometry literature and typically halves distance error. The README's "per-user-calibratable" is true of the parameter but no calibration path exists.</td></tr>
+
+<tr><td><strong>The motion gate admits the state where tremor lives</strong></td><td>step_counter.py:287–292<br>motion_context.py:20–21</td><td>The gate accepts <span class="mono">LOW MOTION</span>, which spans 0.03–0.20 g RMS — the band that moderate rest tremor occupies. The 0.3 s refractory period (200 spm ceiling) will reject tremor above ~3.3 Hz, so 4–6 Hz Parkinsonian tremor is largely filtered by that mechanism rather than by the gate. But 3–3.3 Hz tremor and post-filter sub-harmonics are not covered. This is the README's most confident activity claim ("this is what prevents tremor from being miscounted"), so it deserves an explicit validation recording rather than an argument.</td></tr>
+
+<tr><td><strong>Interval statistics computed twice per update</strong></td><td>step_counter.py:200, 241</td><td><span class="mono">_cadence_spm()</span> and <span class="mono">_walking_confidence()</span> each rebuild the same interval list from <span class="mono">_recent_step_times</span>. Compute once and pass it.</td></tr>
+</table>
+
+<h3>6.3 PPG</h3>
+
+<table>
+<tr><th style="width:20%">Finding</th><th style="width:18%">Location</th><th>Detail and suggested direction</th></tr>
+
+<tr><td><strong>The sophisticated peak detector is unreachable from the HR path</strong></td><td>algorithms.py:1323–1696, 1782–1807</td><td><span class="mono">_detect_peaks</span> and <span class="mono">_score_beats</span> — roughly 370 lines implementing rolling z-score normalisation, short-time-energy gating, adaptive prominence scaling and per-beat morphology scoring — are no longer called by <span class="mono">estimate_heart_rate</span>, which the docstring says was deliberately simplified to a plain <span class="mono">find_peaks</span> pass. Only SpO₂ still uses them. The README's PPG "Peak Detection" row describes the unreachable version. Simplifying was a reasonable engineering decision; the documentation just needs to follow it.</td></tr>
+
+<tr><td><strong>Heart rate uses a plain median, not a confidence-weighted one</strong></td><td>algorithms.py:1833</td><td><span class="mono">median_rr_sec = float(np.median(rr))</span>. The README says "confidence-weighted median of cleaned RR intervals." A <span class="mono">_weighted_median</span> helper exists and is well written, but is used only in the SpO₂ path.</td></tr>
+
+<tr><td><strong>Signal quality is computed twice per call</strong></td><td>ppg_processor.py:251<br>algorithms.py:1849</td><td><span class="mono">PPGProcessor.process</span> calls <span class="mono">compute_signal_quality</span>, then calls <span class="mono">estimate_heart_rate</span>, which calls it again on the same buffer. Each invocation is a band-pass <span class="mono">filtfilt</span> plus an FFT. The docstring at algorithms.py:1743–1746 acknowledges the redundancy as deliberate; combined with P0-1's 104 Hz invocation it is no longer a small trade.</td></tr>
+
+<tr><td><strong>The notch guard window is wider than the peak-spacing constraint</strong></td><td>algorithms.py:1783, 1794–1806</td><td><span class="mono">find_peaks(distance=…)</span> enforces 0.3 s spacing while the dicrotic-notch guard examines candidates within 0.5 s. Above 120 BPM, genuine consecutive beats fall inside the guard window and survive only via the prominence-ratio test — so a fast heart rate with beat-to-beat amplitude variation risks having real beats suppressed. Tying the guard window to the running RR estimate rather than a fixed constant would remove the interaction.</td></tr>
+
+<tr><td><strong>Overall confidence floors the term it calls the weakest link</strong></td><td>ppg_processor.py:410–414</td><td>The comment states "a reading is only as trustworthy as the weakest link," but the expression applies <span class="mono">max(hr_quality["overall_confidence"], 0.3)</span>, placing a floor under that factor. Either drop the floor or reword the rationale.</td></tr>
+
+<tr><td><strong>SpO₂ calibration rests on a single reference point</strong></td><td>algorithms.py:238–295</td><td>The quadratic is anchored at one measured point plus two assumed anchors. The comment block is exemplary in admitting this. For publication, either present SpO₂ as uncalibrated ratio-of-ratios output or collect a multi-point calibration — the file's own <span class="mono">fit_spo2_calibration</span> is designed for exactly that.</td></tr>
+
+<tr><td><strong>Module-level mutable SpO₂ state</strong></td><td>algorithms.py:471–476, 495</td><td><span class="mono">_spo2_state</span> and <span class="mono">SPO2_SELF_CAL_OFFSET</span> are module globals in a file whose header advertises statelessness. Documented and deliberate, but it makes the module non-reentrant, so replay and live capture cannot run concurrently in one process — which matters given that replay is a stated use case.</td></tr>
+</table>
+
+<h3>6.4 Runtime and firmware</h3>
+
+<table>
+<tr><th style="width:20%">Finding</th><th style="width:18%">Location</th><th>Detail and suggested direction</th></tr>
+
+<tr><td><strong>JSON rewrite, CSV flush and a 22-line console block at 104 Hz</strong></td><td>runtime_v2.py:388–389, 457, 459–480</td><td>Each analysis cycle opens and rewrites <span class="mono">realtime_metrics_v2.json</span>, flushes the CSV to disk, and prints twenty-two lines. At 104 Hz that is ~104 file opens and ~104 flushes per second, and roughly 2,300 lines of console output per second. Fixing P0-1 largely resolves this; independently, the JSON write should be atomic (write to a temp file and <span class="mono">os.replace</span>) since the dashboard polls the same file every 100 ms and can currently read a partially written document.</td></tr>
+
+<tr><td><strong>Module-level mutable global state throughout the runtime</strong></td><td>runtime_v2.py:48–77</td><td><span class="mono">packet_count</span>, <span class="mono">sample_count</span>, six deques, the pipeline, the CSV handle and <span class="mono">latest_metrics</span> are all module-level. The CSV file is opened at import time, so importing the module for any reason truncates <span class="mono">realtime_capture_v2.csv</span>. Wrapping this in a <span class="mono">Runtime</span> class would also make replay and multi-device capture possible.</td></tr>
+
+<tr><td><strong>The capture file is only closed on KeyboardInterrupt</strong></td><td>runtime_v2.py:549–555</td><td>Any other exit path — BLE disconnect, an exception in the handler, SIGTERM — leaves buffered CSV rows unwritten. A <span class="mono">try/finally</span> or context manager closes the gap.</td></tr>
+
+<tr><td><strong>Six separate I2C transactions per IMU sample</strong></td><td>parksense_ble_stream_v4.ino:299–304</td><td>Each <span class="mono">readFloatAccelX/Y/Z</span> and <span class="mono">readFloatGyroX/Y/Z</span> is an independent register read with its own address phase. The LSM6DS3's output registers are contiguous, so a single 12-byte burst read replaces all six and cuts bus time roughly fivefold — directly relevant to the power question, since bus time is awake time.</td></tr>
+
+<tr><td><strong>The FIFO drain loop is unbounded</strong></td><td>parksense_ble_stream_v4.ino:269–274</td><td><span class="mono">while (max30102.available())</span> has no iteration cap. The comment records that FIFO backlog previously caused a visible stall; a bounded drain (e.g. at most 16 samples per tick) makes the worst case explicit rather than relying on the tick staying ahead of the sensor.</td></tr>
+
+<tr><td><strong>No connection-parameter negotiation</strong></td><td>parksense_ble_stream_v4.ino:145–150</td><td>The firmware never calls <span class="mono">requestConnectionParameter()</span>, so the connection interval is entirely the central's choice. The README's "BLE packets are scheduled efficiently to minimise radio activity" is not implemented — this is where that claim would live. Also, <span class="mono">configPrphConn(247, 247, 6, 6)</span> passes 247 as the second argument, which is the connection event length in 1.25 ms units (~308 ms), not a second MTU. This looks like the MTU value duplicated by accident.</td></tr>
+
+<tr><td><strong>Notification failures are silently ignored</strong></td><td>parksense_ble_stream_v4.ino:338–342</td><td>The return value of <span class="mono">imuChar.notify()</span> is explicitly discarded with a comment saying no action is needed. For a research platform, a dropped packet is lost data — counting failures and exposing the count would make packet loss measurable rather than invisible.</td></tr>
+</table>
+
+<h2 class="pb">7. Reachability and Dead Code</h2>
+
+<p>Built by resolving every <span class="mono">import</span> statement in the repository against the live entry points (<span class="mono">runtime_v2.py</span> and <span class="mono">realtime_dashboard_v2.py</span>).</p>
+
+<table>
+<tr><th style="width:32%">Module</th><th style="width:14%">Importers</th><th>Assessment</th></tr>
+<tr><td><span class="mono">config.py</span></td><td>none</td><td>Entirely unreferenced. Its constants are duplicated as literals elsewhere — and they <em>disagree</em>: <span class="mono">LOWCUT=3.0/HIGHCUT=8.0</span> matches bandpass.py, but <span class="mono">TREMOR_MIN_FREQ=3.5/MAX=7.5</span> matches feature_extractor.py while the detector's own gate is 4.0–6.5. Three different notions of "the tremor band" in one codebase.</td></tr>
+<tr><td><span class="mono">detector/temporal.py</span></td><td>test only</td><td>The README's "Temporal Validator." Never constructed at runtime.</td></tr>
+<tr><td><span class="mono">pipeline/signal_pipeline.py</span></td><td>none</td><td>Duplicate of <span class="mono">MotionPipeline</span>'s preprocessing — and applies the filters in the opposite order (band-pass then notch, versus notch then band-pass). Whichever is intended, having both invites the wrong one being cited.</td></tr>
+<tr><td><span class="mono">detectors/tremor_detector_v2.py</span></td><td>none</td><td>A <span class="mono">detectors/</span> package sitting beside the live <span class="mono">detector/</span> package. One character apart.</td></tr>
+<tr><td><span class="mono">realtime/ble_receiver.py</span><br><span class="mono">realtime/ble_receiver2.py</span><br><span class="mono">realtime/ble_receiver_v2.py</span></td><td>none</td><td>Three near-identical BLE receivers, all superseded by <span class="mono">runtime_v2.py</span>. All three contain <span class="mono">from realtime_tremor import RealtimeTremorDetector</span> — a bare import that cannot resolve under the package layout, so all three raise <span class="mono">ModuleNotFoundError</span> on import.</td></tr>
+<tr><td><span class="mono">runtime/runtime_v2_backup.py</span></td><td>none</td><td>A manual backup committed to a version-controlled repository.</td></tr>
+<tr><td><span class="mono">fusion/sensor_fusion.py</span><br><span class="mono">fusion/fusion_engine.py</span><br><span class="mono">realtime/realtime_pipeline.py</span><br><span class="mono">calibration/gyro_calibration.py</span></td><td>none (mutual)</td><td>A self-contained dead subtree: <span class="mono">realtime_pipeline</span> imports the fusion and calibration modules, and nothing imports <span class="mono">realtime_pipeline</span>. Note the implication — <strong>gyroscope calibration is never applied in the live path</strong>, so any zero-rate bias goes uncorrected into the tremor detector.</td></tr>
+<tr><td><span class="mono">analytics/</span> (5 files)<br><span class="mono">dataset/build_dataset.py</span><br><span class="mono">replay/replay_v2.py</span></td><td>none</td><td>Standalone scripts. <span class="mono">tremor_detector_v2/v3/v4.py</span> are three generations of superseded detector kept side by side. <span class="mono">replay_v2.py</span> is the README's "Replay framework."</td></tr>
+<tr><td><span class="mono">dashboard/realtime_dashboard.py</span><br><span class="mono">dashboard/dashboard_v2.py</span><br><span class="mono">+ components/graphs/layout</span></td><td>partial</td><td>Two complete parallel dashboard implementations. The documented one, <span class="mono">realtime_dashboard_v2.py</span>, is self-contained; <span class="mono">dashboard_v2.py</span> imports the <span class="mono">layout</span>/<span class="mono">graphs</span> helpers that the live one does not use.</td></tr>
+<tr><td><span class="mono">live_dashboard.py</span>, <span class="mono">record_imu.py</span></td><td>none</td><td>Serial-port era tooling, superseded by BLE.</td></tr>
+<tr><td><span class="mono">inference/future_ml_engine.py</span><br><span class="mono">models/tremor_classifier.py</span></td><td>none</td><td>Deliberate placeholders — reasonable to keep, worth marking as such.</td></tr>
+<tr><td><span class="mono">realtime_metrics.json</span> ×3<br><span class="mono">realtime_metrics_v2.json</span> ×2</td><td>—</td><td>Generated artefacts committed to git, in three directories. <span class="mono">.gitignore</span> lists <span class="mono">realtime_metrics*.json</span>, so these were tracked before the rule was added and need <span class="mono">git rm --cached</span>.</td></tr>
+</table>
+
+<p><strong>Summary:</strong> approximately 20 of 49 Python files are unreachable from the live entry points. That is not unusual for a fast-moving research repository, but for a project whose stated value proposition is "a documented, replicable architecture," it is the first thing that undermines a reader's confidence — and three of the dead modules are ones the README describes as live features.</p>
+
+<h2 class="pb">8. README Review — an IEEE Reviewer's Reading</h2>
+
+<p>The README is genuinely well constructed. The Current Limitations section is more candid than most published work in this space, the "this is an architectural comparison, not a performance claim" caveat is exactly right, and the disclaimer is unambiguous. That care makes the specific inaccuracies below more costly, not less — a reviewer who trusts the framing will trust the numbers.</p>
+
+<h3>8.1 Claims that the code does not support</h3>
+
+<table>
+<tr><th style="width:29%">README claim</th><th style="width:31%">What the code does</th><th style="width:11%">Severity</th><th>Suggested resolution</th></tr>
+
+<tr><td>"Butterworth Band-pass — isolates the Parkinsonian tremor band (4.0–6.5 Hz)"</td><td>bandpass.py:17–18 — the filter is 3.0–8.0 Hz. 4.0–6.5 is the detector's <em>scoring gate</em> (multiaxis_detector.py:79), a different thing.</td><td>High</td><td>State both: filter band 3.0–8.0 Hz, scoring band 4.0–6.5 Hz. The two-stage design is defensible and worth explaining.</td></tr>
+
+<tr><td>"Temporal Validator — requires 5 positive windows out of a rolling 10 before confirming tremor"</td><td>The class implementing this is never instantiated at runtime (P1-6).</td><td>High</td><td>Wire it in or remove the claim.</td></tr>
+
+<tr><td>"State Machine — hysteresis-based states prevent rapid flip-flopping"</td><td>Computed, then discarded; the published classification is a bare <span class="mono">score &gt;= 80</span> test (P1-6).</td><td>High</td><td>Publish the state-machine output as the classification.</td></tr>
+
+<tr><td>"Motion-aware Confidence — HR confidence is discounted according to the Motion Pipeline's reported activity state"</td><td>The argument is never passed; the multiplier is always 1.0 (P1-5).</td><td>High</td><td>Pass it, and fix the <span class="mono">LOW_MOTION</span> / <span class="mono">LOW MOTION</span> key mismatch.</td></tr>
+
+<tr><td>"Deep Sleep — ultra-low-power sleep state"; "Deep Sleep Current: microamp range"</td><td>No power API is called anywhere in the firmware; the radio and PPG LEDs stay active (P0-4).</td><td>High</td><td>Implement the sleep path, then re-measure. This is the most falsifiable number in the document.</td></tr>
+
+<tr><td>"PPG (IR/RED) Sampling ~50 Hz" (stated in three places)</td><td>Firmware polls every 100 ms and keeps one sample — ~10 Hz effective. The firmware's own comment says "runs at 10 Hz" (P0-2).</td><td>High</td><td>Correct the figure, or raise the actual rate.</td></tr>
+
+<tr><td>"Peak Detection — rolling z-score normalization, local energy gating, adaptive prominence scaling, refractory period, physical pulse-width gate"</td><td>Describes <span class="mono">_detect_peaks</span>, which <span class="mono">estimate_heart_rate</span> no longer calls; HR uses a plain <span class="mono">find_peaks</span> pass. Still accurate for SpO₂.</td><td>Medium</td><td>Split the description: this machinery for SpO₂, a simplified detector for HR.</td></tr>
+
+<tr><td>"Heart Rate — confidence-weighted median of cleaned RR intervals"</td><td><span class="mono">np.median(rr)</span>, unweighted (algorithms.py:1833).</td><td>Medium</td><td>Say "median," or use the <span class="mono">_weighted_median</span> helper that already exists.</td></tr>
+
+<tr><td>"Packet Size 248 Bytes"</td><td>8-byte header + 10 × 20-byte samples = <strong>208 bytes</strong>, consistently in both firmware and host. Also internally inconsistent: 248 exceeds the stated 247-byte MTU, and the usable ATT payload is 244.</td><td>Medium</td><td>Correct to 208.</td></tr>
+
+<tr><td>"Notch Filter — digital 50 Hz filter rejects mains electrical interference"</td><td>Applied to gyroscope data on a battery-powered device with no mains coupling, before a band-pass that already removes 50 Hz (§6.1).</td><td>Medium</td><td>Remove the filter and the claim. A reviewer familiar with MEMS sensing will query this.</td></tr>
+
+<tr><td>"Cross-pipeline gating … the same motion-context classification … is reused to gate the step counter and to discount PPG confidence"</td><td>One of the two is implemented. Of the section's four bullets, only motion-gated stepping is live.</td><td>Medium</td><td>Reduce to what runs, or implement the rest — this is the paper's main novelty argument.</td></tr>
+
+<tr><td>"Sample output: Frequency 5.18 Hz"; "Heart Rate 71.4 BPM"</td><td>Welch resolution here is 0.406 Hz, so 5.18 is not an attainable output. And per P0-2, 71.4 BPM would imply a true rate of ~148 BPM.</td><td>Medium</td><td>Regenerate the sample output from a real run after the fixes.</td></tr>
+
+<tr><td>"Estimated Battery Life ~100 hours continuous"</td><td>Derived from the ~7 mA active figure, which is itself measured on firmware that never sleeps between samples (P0-4).</td><td>Medium</td><td>Re-derive after the sleep and I2C-burst changes — the number will likely improve, which is a better story.</td></tr>
+
+<tr><td>"Runtime Latency &lt;100 ms after analysis window"</td><td>Analysis runs at 104 Hz on a 4 s window, so a detection is inherently informed by up to 4 s of history. "Latency" is not defined in the document.</td><td>Low</td><td>Define the term — update interval, window length, and detection delay are three different quantities and reviewers will want all three.</td></tr>
+
+<tr><td>"Modular, independently-testable signal-processing architecture"</td><td>Zero assertions across six test files; no <span class="mono">requirements.txt</span>; CI cannot install dependencies (P1-11).</td><td>Low</td><td>"Independently testable" is a design property and defensible — but it needs at least one real test to stand behind it.</td></tr>
+
+<tr><td>"Repository Structure" tree; Getting Started paths; embedded images; "See the <span class="mono">LICENSE</span> file"</td><td><span class="mono">Android/</span>, <span class="mono">hardware/</span>, <span class="mono">research/</span>, <span class="mono">docs/images/</span>, <span class="mono">LICENSE</span> and both named firmware directories are absent from this branch (§3.1).</td><td>High</td><td>Either merge the missing material or scope the README to the branch. A reviewer cloning the repo hits this within a minute.</td></tr>
+</table>
+
+<h3>8.2 Terminology and framing</h3>
+
+<ul>
+<li><strong>"Digital biomarker"</strong> is used for every output including step count and distance. In the neurology literature the term carries a connotation of validation against a clinical endpoint. Consider "derived metrics" for the activity channel and reserving "candidate digital biomarker" for the tremor measures.</li>
+<li><strong>"Tremor Burden"</strong> appears in the biomarker table and the pipeline description but no module computes it — there is no burden accumulator in the live path. Either implement it or remove it.</li>
+<li><strong>"Severity" categories</strong> (NONE / VERY MILD / MILD / MODERATE / HIGH / SEVERE) are thresholds on an unvalidated composite score. Because those words map onto UPDRS-style clinical vocabulary, a reviewer will read them as claiming correspondence with clinical severity. Neutral labels — or an explicit "score band, not a clinical severity rating" note — would avoid the inference.</li>
+<li><strong>"~104 Hz" versus "104 Hz"</strong> is used inconsistently for the same quantity. Pick one and state the measured jitter.</li>
+<li><strong>Missing citations.</strong> Several well-established choices are presented as bare constants: the 4–6 Hz Parkinsonian rest-tremor band, the 0.25 ratio for the AC/DC perfusion bound, the 20% ectopic-beat threshold, Elgendi's one-third systolic upstroke ratio (cited in a comment at algorithms.py:186 but not in the README). Citing these strengthens the work considerably and costs a paragraph.</li>
+<li><strong>The comparison table framing is good.</strong> The "architectural comparison, not a performance claim" sentence is the right instinct and should be kept verbatim — it pre-empts the most obvious reviewer objection.</li>
+</ul>
+
+<h2 class="pb">9. Prioritised Roadmap</h2>
+
+<p>Ordered by impact per unit of effort. Items 1–4 are the ones that change whether the system produces correct numbers.</p>
+
+<table>
+<tr><th style="width:5%">#</th><th style="width:30%">Action</th><th style="width:11%">Effort</th><th>Why it ranks here</th></tr>
+
+<tr><td><strong>1</strong></td><td>Analyse once per hop (e.g. every 52 samples) rather than every sample</td><td>~20 lines</td><td>Restores the intended meaning of every temporal constant in the system and removes ~99% of the compute. Single highest-leverage change in the report.</td></tr>
+
+<tr><td><strong>2</strong></td><td>Fix the PPG rate chain end to end: accumulate the FIFO, pass the real <span class="mono">fs</span>, assert on mismatch</td><td>~40 lines</td><td>Likely restores heart rate, HRV and SpO₂ — four biomarkers currently unreliable. Verify first with the two-minute <span class="mono">hr_debug</span> check in P0-2 before changing anything.</td></tr>
+
+<tr><td><strong>3</strong></td><td>Apply <span class="mono">imu.settings</span> before <span class="mono">begin()</span>; add saturation flags to the packet</td><td>~10 lines</td><td>Removes false transients from the primary tremor channel and closes the IMU aliasing path.</td></tr>
+
+<tr><td><strong>4</strong></td><td>Implement real sleep: shut down the PPG LEDs, stop advertising, yield to the SoftDevice in the active loop</td><td>~30 lines</td><td>Makes the README's power claims true rather than aspirational, and the improvement is measurable on hardware you already have.</td></tr>
+
+<tr><td><strong>5</strong></td><td>Publish the state machine's output as the classification; wire in or delete <span class="mono">TemporalSmoother</span></td><td>~15 lines</td><td>Turns a documented feature into a real one. Depends on #1 to be meaningful.</td></tr>
+
+<tr><td><strong>6</strong></td><td>Pass <span class="mono">motion_state</span> into <span class="mono">PPGProcessor</span>; replace string keys with shared constants</td><td>~10 lines</td><td>Activates the fusion claim that carries the paper's novelty argument, and prevents the next silent key mismatch.</td></tr>
+
+<tr><td><strong>7</strong></td><td>Add <span class="mono">requirements.txt</span>; convert the six scripts to assertion-based tests; add synthetic-signal tests for the detector and HR estimator</td><td>~1 day</td><td>Would have caught #2 immediately. Also gives the paper's validation section something concrete to point at.</td></tr>
+
+<tr><td><strong>8</strong></td><td>Reconcile the README against the code using the table in §8.1</td><td>~2 hours</td><td>Do this before any external review. Most items are wording; five require the fixes above first.</td></tr>
+
+<tr><td><strong>9</strong></td><td>Delete the dead subtree; merge <span class="mono">detector/</span> and <span class="mono">detectors/</span>; <span class="mono">git rm --cached</span> the generated JSON</td><td>~2 hours</td><td>Removes ~20 unreachable files and three broken modules. Purely subtractive, zero behavioural risk.</td></tr>
+
+<tr><td><strong>10</strong></td><td>Report the best axis's own frequency; add parabolic peak interpolation; constrain the argmax to the band</td><td>~20 lines</td><td>Makes the headline frequency biomarker meaningful and earns the precision already being reported.</td></tr>
+
+<tr><td><strong>11</strong></td><td>Remove the 50 Hz notch; move the gravity filter to <span class="mono">sos</span> form; normalise spectral entropy; rename <span class="mono">peak_prominence</span></td><td>~20 lines</td><td>Removes an indefensible filter stage and three small correctness issues a reviewer would notice.</td></tr>
+
+<tr><td><strong>12</strong></td><td>Replace the binary score sum with graded membership functions; add amplitude/SNR to the confidence estimator</td><td>~1 day</td><td>Removes cliff-edge behaviour and makes confidence independent evidence rather than a restatement of the score. Reads far better in a paper.</td></tr>
+
+<tr><td><strong>13</strong></td><td>Handle <span class="mono">micros()</span> wraparound host-side or extend the header to 64-bit</td><td>~15 lines</td><td>Required before any recording longer than 71 minutes is analysed.</td></tr>
+
+<tr><td><strong>14</strong></td><td>Step counter: O(1) rolling statistics, signed threshold statistics, cadence-dependent stride length</td><td>~1 day</td><td>Refinements to the strongest module; the stride model is the one with real accuracy impact.</td></tr>
+
+<tr><td><strong>15</strong></td><td>Firmware: burst-read the IMU registers, bound the FIFO drain, request connection parameters, count notify failures</td><td>~30 lines</td><td>Micro-optimisations with a direct power payoff, plus packet loss becomes measurable.</td></tr>
+</table>
+
+<h2>10. Closing Assessment</h2>
+
+<p>ParkinSense is a stronger piece of work than this report's length suggests. An audit finds problems by construction; it does not weigh them against what went right. So to be explicit about what went right: the module decomposition is genuinely good, the PPG algorithm file is careful and literature-aware in a way that is rare in a project this size, the step counter is well-built and honestly documented, decoupling the dashboard from the runtime through files was the correct architectural call, and the README's willingness to state its own limitations plainly is a real asset.</p>
+
+<p>The central problem is a gap between the designed system and the running system. Sophisticated components were written, and then either not wired in, or wired in under conditions that break their assumptions — a per-sample loop where a per-window loop was intended, a default sample rate that nobody overrode, a settings struct populated one line too late. These are integration defects, not design defects, which is why the fix list is short relative to the finding list.</p>
+
+<p>On priorities: the single most useful thing would be to verify P0-2 with the two-minute debug check before touching anything else. If heart rate is indeed returning <span class="mono">None</span> for the reason predicted, that one finding explains an entire troubleshooting section of the README and unblocks four biomarkers. Items 1–4 together are perhaps a day of work and change the system from "produces plausible-looking numbers" to "produces numbers you can defend."</p>
+
+<p>On the research direction ChatGPT proposed — personalised models, bradykinesia and dyskinesia indices, validation against published datasets — that assessment is right about where the ceiling is, but the sequencing should be inverted. Adaptive and personalised models trained on a signal chain with an unapplied gyroscope range, an aliased PPG stream, and a temporal validator that never runs would learn those artefacts. Fix the measurement chain first; then the algorithmic ambition has something trustworthy to build on. The instinct to compare the tremor detector against TremoSense, PKG and KinesiaU is a good one — but the comparison only means something once you can state, with test coverage behind it, what your own detector actually does.</p>
+
+<p class="note" style="margin-top:16pt">Prepared as a report only; no source files were modified. Every finding cites a file and line and was verified against the code as written. Predictions requiring hardware confirmation are labelled as such with a stated test.</p>
+
+</body>
+</html>

@@ -253,11 +253,16 @@ class StepCounter:
     # Public API
     # ------------------------------------------------------------------
 
-    def update(self, ax, ay, az, motion_state, now=None):
+    def update(self, ax, ay, az, motion_state, now=None, debug=False):
         """
         Feed one accelerometer sample (in g) and the current motion_state
         string from MotionPipeline's context. Call this once per sample,
         at the same cadence as MotionPipeline.process().
+
+        debug=True prints one diagnostic line per call showing every
+        stage of the pipeline and, if no step was registered this call,
+        why not. TEMPORARY - for debugging step-detection issues only,
+        remove/disable before shipping (it will spam stdout at 104 Hz).
         """
         now = now if now is not None else time.monotonic()
 
@@ -270,7 +275,28 @@ class StepCounter:
         # Only trust peaks while MotionPipeline says the body is
         # actually moving. This is the gate that keeps tremor and
         # device-handling from registering as steps.
-        gating_ok = motion_state in ("active", "walking", "moving")
+        #
+        # Normalized against MotionPipeline's actual output (confirmed via
+        # debug instrumentation: it emits uppercase strings like "ACTIVE"
+        # and "LOW MOTION", not the lowercase "active" this gate originally
+        # checked against -- that mismatch was silently rejecting every
+        # sample). LOW MOTION is included because normal/light walking
+        # legitimately produces that state; only REST and unrecognized
+        # states should block detection.
+        normalized_motion_state = (motion_state or "").strip().upper()
+        gating_ok = normalized_motion_state in (
+            "ACTIVE",
+            "WALKING",
+            "MOVING",
+            "LOW MOTION",
+        )
+
+        steps_before = self.steps
+        rejected_reason = None
+        peak_detected = False
+
+        if not gating_ok:
+            rejected_reason = "MOTION_GATE"
 
         if gating_ok:
             # Use the SIGNED filtered value so we only fire on the
@@ -279,12 +305,16 @@ class StepCounter:
             # double-count every step.
             if not self._above_threshold and filtered > self._threshold:
                 self._above_threshold = True
+                peak_detected = True
 
                 interval_ok = True
                 gap_from_last = None
                 if self._last_step_time is not None:
                     gap_from_last = now - self._last_step_time
                     interval_ok = gap_from_last >= self.min_step_interval_s
+
+                if not interval_ok:
+                    rejected_reason = "REFRACTORY_PERIOD"
 
                 if interval_ok:
                     self.steps += 1
@@ -330,6 +360,10 @@ class StepCounter:
                 # threshold (hysteresis band), so a single step doesn't
                 # get double-counted as it decays back down.
                 self._above_threshold = False
+            elif self._above_threshold:
+                rejected_reason = "NOT_REARMED"
+            else:
+                rejected_reason = "BELOW_THRESHOLD"
         else:
             self._above_threshold = False
 
@@ -380,6 +414,20 @@ class StepCounter:
 
         self._last_update_time = now
         self.active_minutes = self._active_seconds / 60.0
+
+        if debug:
+            step_registered = self.steps > steps_before
+            print(
+                f"Magnitude={magnitude:6.3f}  "
+                f"Filtered={filtered:6.3f}  "
+                f"Threshold={self._threshold:6.3f}  "
+                f"Motion={motion_state!r:14} (normalized={normalized_motion_state!r:12})  "
+                f"GateOK={gating_ok!s:5}  "
+                f"Peak={peak_detected!s:5}  "
+                f"StepRegistered={step_registered!s:5}  "
+                f"Rejected={rejected_reason or '-':20}  "
+                f"Steps={self.steps}"
+            )
 
         return {
             "steps": self.steps,
