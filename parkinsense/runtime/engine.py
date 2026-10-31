@@ -294,7 +294,8 @@ class RuntimeEngine:
             **{k: r[k] for k in ("tremor_state", "tremor_probability", "tremor_evidence", "tremor_type",
                                  "tremor_amplitude_dps", "tremor_power", "tremor_snr_db",
                                  "arm_movement_rms_dps", "tremor_quality")},
-            "hr_quality_state": ppg.get("hr_quality_state"),
+            "hr_quality_state": (C.Quality.RATE_INVALID.value if self.rate_status() == "INVALID"
+                                 else ppg.get("hr_quality_state")),
             "ppg_effective_rate_hz": ppg.get("ppg_effective_rate_hz"),
             "motion_coupled_hr": ppg.get("motion_coupled_hr"),
             "device_rate_hz": round(rate, 3) if rate else None,

@@ -102,3 +102,23 @@ def test_analysis_errors_are_surfaced(monkeypatch):
 def test_ppg_rate_contract():
     eng = E.RuntimeEngine()
     assert eng.ppg.fs == C.PPG_SLOT_RATE_HZ == C.SAMPLE_RATE_HZ
+
+
+def test_published_metrics_are_strict_json():
+    import json
+    sig = S.rest_tremor(seconds=12, seed=2)
+    p = S.ppg(seconds=12, seed=2)
+    ir, red = S.ppg_to_slots(p, path="v2")
+    _, an = run_engine(E.RuntimeEngine(), sig, ir=ir, red=red, version=2)
+    json.dumps({k: v for k, v in an[-1].items() if not k.startswith("_")}, allow_nan=False)
+
+
+def test_rate_invalid_also_marks_heart_rate():
+    eng = E.RuntimeEngine()
+    sig = S.rest(seconds=15, seed=0)
+    n = (sig.n // 10) * 10
+    for start in range(0, n, 10):
+        rows = [(sig.ax[i], sig.ay[i], sig.az[i], sig.gx[i], sig.gy[i], sig.gz[i], 1600, 600)
+                for i in range(start, start + 10)]
+        eng.process_packet(P.encode(rows, int(start * P.SAMPLE_PERIOD_US * 1.06)))
+    assert eng.metrics["hr_quality_state"] == "RATE_INVALID"

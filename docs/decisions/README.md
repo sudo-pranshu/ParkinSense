@@ -27,6 +27,12 @@ useful than its current state.
 | [0001](0001-two-clock-runtime-scheduling.md) | Separate per-sample streaming from per-window analysis | Accepted |
 | [0002](0002-time-based-temporal-thresholds.md) | Express temporal thresholds in seconds, not call counts | Accepted |
 | [0003](0003-capture-column-time-bases.md) | Mixed time bases within the capture file | Accepted |
+| [0004](0004-package-structure.md) | One `parkinsense` package; dead code removed | Accepted |
+| [0005](0005-motion-spectral-features.md) | Tremor features on the un-band-passed spectrum; context excludes tremor band | Accepted |
+| [0006](0006-runtime-engine.md) | Pure RuntimeEngine on signal time | Accepted |
+| [0007](0007-tremor-hmm.md) | HMM temporal filter publishes the tremor classification | Accepted (supersedes the count state machine) |
+| [0008](0008-ppg-rate-and-quality.md) | PPG at the true slot rate, owned state, explicit quality | Accepted |
+| [0009](0009-step-counter-acceptance.md) | Keep the v1 step-detection algorithm; rewrite stays experimental | Accepted |
 
 ## Template
 

@@ -31,7 +31,7 @@ v2.0 design (each element from published wrist step-counting work):
     found band-limited magnitude + peak detection among the most robust);
   * peak = local maximum above max(MIN_PEAK_G, K_RMS * running RMS);
   * continuity/regularity gate in the style of the Verisense algorithm
-    (Gu et al. 2017; Rowlands et al., J Sports Sci 2022; open-source,
+    (Rowlands et al., J Sports Sci 2022, doi 10.1080/02640414.2022.2147134; open-source,
     MIT-licensed reference in the `walking` R package): candidates count
     only once a run of BOUT_MIN_STEPS has regular intervals (CV <= BOUT_MAX_CV);
     on confirmation the whole run is counted retroactively, so bout onsets

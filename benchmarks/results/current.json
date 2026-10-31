@@ -74,5 +74,47 @@
     "onset_detected": "8/8",
     "offset_latency_s_median": 8.074599999999997,
     "offset_cleared": "8/8"
+  },
+  "steps": {
+    "walking_count_error_pct": {
+      "mean": -9.732001503409792,
+      "mean_abs": 9.732001503409792,
+      "worst": -21.100917431192663
+    },
+    "false_steps_per_minute": {
+      "rest_tremor": 0.3333333333333333,
+      "voluntary": 48.833333333333336,
+      "rest": 0.0,
+      "vibration": 0.0
+    }
+  },
+  "ppg_v1_path": {
+    "rest_hr_mae_bpm": 0.2920130420661863,
+    "rest_hr_reported_in": "10/10",
+    "rest_hr_coverage": 1.0,
+    "rest_rmssd_mae_ms": null,
+    "rest_rmssd_reported_in": "0/10",
+    "rest_hr_confidence_median": 0.5923999999999999,
+    "motion_hr_mae_bpm": 27.74888757552576,
+    "motion_hr_reported_in": "6/6",
+    "motion_hr_confidence_median": 0.13608333333333333
+  },
+  "ppg_v2_path": {
+    "rest_hr_mae_bpm": 0.3710207608110423,
+    "rest_hr_reported_in": "10/10",
+    "rest_hr_coverage": 1.0,
+    "rest_rmssd_mae_ms": 6.6512875780302725,
+    "rest_rmssd_reported_in": "10/10",
+    "rest_hr_confidence_median": 0.7333500000000001,
+    "motion_hr_mae_bpm": 27.998887575525753,
+    "motion_hr_reported_in": "6/6",
+    "motion_hr_confidence_median": 0.1666666666666667
+  },
+  "cost": {
+    "wall_s_per_60s_signal": 2.269475204999708,
+    "realtime_factor": 26.437830150256136,
+    "analysis_packet_latency_ms_median": 17.768414999864035,
+    "analysis_packet_latency_ms_p95": 21.522522800023577,
+    "analyses_per_minute": 113
   }
 }
