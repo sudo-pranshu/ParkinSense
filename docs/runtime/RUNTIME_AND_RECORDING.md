@@ -292,8 +292,12 @@ The latest analysis as JSON: every analysis column above plus `hr_quality` (dict
 sub-scores), `latest_ir`, `latest_red`, `signal_time_s`, `motion_pipeline_state`,
 `integrity` (the metadata integrity block), `status` (`WAITING`/`STREAMING`/`DISCONNECTED`)
 and `capture_path`. Keys are only ever added — v2 consumers keep working. `/health` returns
-`status`, `integrity` and `rate_status`. The API binds `0.0.0.0:8000` by default (v2
-behaviour, needed by the phone app on the LAN); use `--host 127.0.0.1` to keep it local.
+`status`, `integrity` and `rate_status`. `/live` serves incremental raw samples and analyses
+(by sequence number) for the dashboard; `/session` and `POST /session/{start,stop}` control
+sessions. `python -m parkinsense.runtime.app` binds `0.0.0.0:8000` by default (v2 behaviour,
+needed by the phone app on the LAN); the launch scripts bind `127.0.0.1` unless `--host` is given.
+`--simulate` and `--replay CSV` run the same engine and recorder on a synthetic or recorded
+stream; such sessions record `device.source` = `simulated` / `replay`.
 Details: [dashboard and API](../software/DASHBOARD_AND_API.md).
 
 ## 9. Running

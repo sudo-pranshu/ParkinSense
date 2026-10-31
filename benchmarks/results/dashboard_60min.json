@@ -1,0 +1,34 @@
+{
+  "minutes": 60.0,
+  "recording": {
+    "capture_mb": 198.5,
+    "generate_s": 183.5
+  },
+  "live": {
+    "first_poll_ms": 93.24,
+    "incremental_poll_ms": 1.66,
+    "overview_callback_ms": 27.68,
+    "live_page_callback_ms": 48.01,
+    "buffers": {
+      "runtime_samples": 6240,
+      "runtime_samples_max": 6240,
+      "runtime_analyses": 1200,
+      "runtime_analyses_max": 1200,
+      "client_samples_max": 3120,
+      "client_analyses_max": 1200
+    }
+  },
+  "history": {
+    "analysis_windows": 7193,
+    "load_cold_ms": 1784.2,
+    "load_cached_ms": 0.0,
+    "tremor_figures_ms": 167.99,
+    "cardio_figures_ms": 196.49,
+    "activity_figures_ms": 144.98,
+    "psd_click_ms": 15.19
+  },
+  "peak_rss_mb_new_paths": 264.8,
+  "legacy_update_ms": 80.82,
+  "full_csv_reread_ms": 3686.04,
+  "peak_rss_mb_total": 1079.9
+}

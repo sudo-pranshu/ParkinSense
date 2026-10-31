@@ -4,12 +4,14 @@
 
 | Command | What it runs | Expected (this branch, laptop) |
 |---|---|---|
-| `pytest` | all non-hardware tests | `64 passed, 1 deselected` in ~40 s |
+| `./check.sh` | everything CI runs (lint, pytest, benchmark smoke, firmware host tests, doc links) | `✔ all checks passed`, ~1 min |
+| `pytest` | all non-hardware tests | `84 passed, 1 deselected` in ~50 s |
 | `pytest tests/unit` | unit tests | 36 passed, ~6 s |
 | `pytest -m hardware` | hardware placeholder | skipped unless `PARKINSENSE_DEVICE` is set |
 | `flake8 parkinsense tests benchmarks --select=E9,F63,F7,F82,F401,F811,F841` | lint (errors only) | `0` |
 | `g++ … firmware/tests/test_packet.cpp` (see [firmware](../firmware/FIRMWARE.md#tests-that-run-without-hardware)) | firmware packing/scheduler logic | `firmware packet tests: OK` |
 | `python -m benchmarks.run_benchmarks --impl current --out benchmarks/results/current.json` | full synthetic benchmark | ~4 min; numbers in [results](../validation/RESULTS.md) |
+| `python -m benchmarks.dashboard_bench --minutes 60` | dashboard live/history paths on a 1-hour recording | ~5 min; [report](../audit/DASHBOARD_2_REPORT.md) |
 
 CI ([`.github/workflows/python-app.yml`](../../.github/workflows/python-app.yml)) runs lint +
 `pytest` on Python 3.10 and 3.12, a benchmark smoke run (`--only cost`), and the firmware host
@@ -20,7 +22,7 @@ tests + sketch type-check, on pushes to `develop`, `main`, `transform/**` and on
 | Directory | Purpose | Files |
 |---|---|---|
 | `tests/unit` | one module in isolation | `test_protocol.py` (wire layout, round-trip, unwrap, sequence, gaps) · `test_features_and_detector.py` (frequency/amplitude accuracy, band ratio, out-of-band rejection, context) · `test_temporal.py` (HMM confirm/release, hop invariance, no lock-up) · `test_ppg.py` (HR accuracy, determinism, HRV gating, motion coupling, enum keys, reset) · `test_activity_and_splits.py` (steps, splits, leakage, baseline) |
-| `tests/integration` | modules together through `RuntimeEngine` | `test_engine.py` (no import side effects, schema, analysis markers, Issue #1 invariants, per-sample steps, bad packets, gaps, loss, wrap, rate validation, error surfacing, strict JSON) · `test_replay_and_recording.py` (recorder lifecycle, **live == replay**, determinism, dataset builder) · `test_dashboard.py` (dashboard callback on a real session; skipped if Dash is missing) |
+| `tests/integration` | modules together through `RuntimeEngine` | `test_engine.py` (no import side effects, schema, analysis markers, Issue #1 invariants, per-sample steps, bad packets, gaps, loss, wrap, rate validation, error surfacing, strict JSON) · `test_replay_and_recording.py` (recorder lifecycle, **live == replay**, determinism, dataset builder) · `test_dashboard.py` (live API incremental + bounded, LiveFeed against a real server incl. runtime loss and session reset, session store read-only, every page, figures with/without data, no zeros for missing values) · `test_launchers.py` (every script's help and usage errors, missing environment, port conflict, duplicate runtime, start → health → Ctrl+C → metadata COMPLETE) |
 | `tests/regression` | golden outputs on the real recordings in `data/reference/` | `test_reference_recordings.py`, `golden.json`, `make_golden.py` |
 | `tests/synthetic` | performance floors on ground-truth signals (small N, CI-sized) | `test_performance_floor.py` |
 | `tests/hardware` | marked `hardware`, skipped by default | placeholder pointing to the manual procedure |

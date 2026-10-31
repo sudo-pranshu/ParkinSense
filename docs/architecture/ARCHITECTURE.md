@@ -21,13 +21,14 @@ flowchart LR
   subgraph Host["Python host — parkinsense/"]
     APP --> ENG["RuntimeEngine"]
     ENG --> REC["SessionRecorder"]
-    ENG --> API["/metrics · metrics JSON"]
+    ENG --> API["/live · /metrics · metrics JSON"]
   end
   REC --> CSV[("capture.csv<br/>metadata.json")]
   CSV --> RP["replay"] --> ENG
   CSV --> DS["datasets"]
   CSV --> AN["analytics"]
   API --> DASH["dashboard"]
+  CSV --> DASH
   API --> MOB["mobile app"]
 ```
 
