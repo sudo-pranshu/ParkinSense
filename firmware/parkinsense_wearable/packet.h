@@ -1,5 +1,5 @@
 // ParkinSense wire protocol v2 -- device side.
-// Specification: docs/protocols/BLE_PROTOCOL.md. Host decoder:
+// Specification: docs/protocol/BLE_PROTOCOL.md. Host decoder:
 // parkinsense/protocol/packet.py. The framing is identical to v1 (208 bytes);
 // v2 gives meaning to `flags` and to the former `reserved` field (sequence
 // number) and changes the gyro wire scale to 64 counts/dps (+-512 dps).

@@ -93,7 +93,7 @@ can no longer drift apart silently.
 `tests/verify_issue1_scheduling.py` asserts column time bases directly rather
 than only row counts:
 
-```
+```text
 distinct sample_count values : 3585 (rows: 3585)   -> unique per row
 distinct packet_count values : 359  (~rows/10)     -> tracks packets, not analyses
 distinct steps values        : 67   (analyses: 35) -> per-sample resolution held

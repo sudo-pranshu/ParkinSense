@@ -88,7 +88,7 @@ record claimed 6, by assuming `high_count` resets on the NO_TREMOR → POSSIBLE
 transition. It does not; it accumulates. Verified directly against
 `TremorStateMachine`:
 
-```
+```text
 hop 1: NO_TREMOR         high=1
 hop 2: POSSIBLE_TREMOR   high=2
 hop 3: POSSIBLE_TREMOR   high=3
@@ -142,7 +142,7 @@ changing this constant silently changes detection latency.
 
 `tests/verify_issue1_scheduling.py`, over 4000 synthetic samples:
 
-```
+```text
 pipeline.process calls : 69     (was 3585 — 52× reduction)
 pipeline.ingest calls  : 4000   (all samples)
 StepCounter.update     : 3585   (all samples)

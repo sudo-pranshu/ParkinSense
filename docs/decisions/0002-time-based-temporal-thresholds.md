@@ -96,7 +96,7 @@ The same reasoning applies — thresholds should read
 `tests/verify_issue1_ppg_timebase.py` runs the same 3 seconds of held
 finger-present at two very different analysis rates:
 
-```
+```text
 FINGER_ON_HYSTERESIS_SECONDS   : 1.0
 confirm delay @ 104 analyses/s : 1.019 s
 confirm delay @ 1 analysis/s   : 2.000 s   (1.0 s hysteresis + 1.0 s hop quantisation)

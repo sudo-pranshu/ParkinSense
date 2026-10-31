@@ -1,3 +1,8 @@
+> **Historical document.** This is the original v1.0 requirements draft, kept for context. It
+> lists objectives (bradykinesia, medication response, sleep, …) that are **not implemented**.
+> Current status of every capability: [biomarkers](../biomarkers/BIOMARKERS.md) and the
+> [README](../../README.md). Requirements here have not been re-validated against pipeline 3.0.0.
+
 # ParkinSense System Requirements Specification (SRS)
 
 Version: 1.0

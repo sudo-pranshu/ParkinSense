@@ -18,7 +18,7 @@ Windows are time-weighted by the hop, so overlap does not bias percentages.
 
 Not provided, deliberately: bradykinesia, dyskinesia, freezing-of-gait and
 sleep scores. Each needs validated reference data this project does not have
-(see docs/research/BIOMARKER_FEASIBILITY.md). PKG/Kinesia-style scores are
+(see docs/biomarkers/BIOMARKERS.md). PKG/Kinesia-style scores are
 proprietary and their algorithms are not public.
 """
 

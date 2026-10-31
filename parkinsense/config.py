@@ -41,7 +41,7 @@ ANALYSIS_HOP_SECONDS = ANALYSIS_HOP_SAMPLES / SAMPLE_RATE_HZ
 # PPG samples arrive one per IMU slot (zero-order hold of the sensor's own
 # rate), so the PPG buffer's sample rate *is* the slot rate. The sensor's
 # distinct-sample rate depends on firmware: 10 Hz for protocol v1, ~100 Hz
-# for protocol v2 (docs/protocols/BLE_PROTOCOL.md).
+# for protocol v2 (docs/protocol/BLE_PROTOCOL.md).
 PPG_SLOT_RATE_HZ = SAMPLE_RATE_HZ
 PPG_WINDOW_SECONDS = 10.0
 

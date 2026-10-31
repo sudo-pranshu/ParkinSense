@@ -66,7 +66,7 @@ class MotionPipeline:
             q_out = quality.value
 
         result = {
-            # legacy-compatible keys (meanings documented in docs/validation/METRICS.md)
+            # legacy-compatible keys (meanings documented in docs/runtime/RUNTIME_AND_RECORDING.md)
             "tremor": bool(published),
             "score": int(round(100 * ev.evidence)),
             "confidence": round(100 * temporal["probability"], 1),

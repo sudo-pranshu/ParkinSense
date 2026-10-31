@@ -1,7 +1,7 @@
 """
 ParkinSense BLE packet protocol -- decoder, encoder and stream integrity.
 
-Authoritative specification: docs/protocols/BLE_PROTOCOL.md. This module
+Authoritative specification: docs/protocol/BLE_PROTOCOL.md. This module
 is the single host-side implementation; nothing else may parse packets.
 
 Wire format (little-endian, packed) -- identical framing in v1 and v2:

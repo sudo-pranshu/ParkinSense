@@ -3,6 +3,7 @@
 **Status:** Accepted · **Date:** 2026-10-31 · **Pipeline:** 3.0.0
 
 ## Problems (verified against the v2.2 source and measured)
+
 1. `band_ratio` was computed on a 3–8 Hz band-passed signal, i.e. in-band power over
    already-band-limited power — ≈1 for nearly any input.
 2. Reported frequency was the unweighted mean of three axes' FFT-bin peaks (0.41 Hz grid),
@@ -13,6 +14,7 @@
 4. The 50 Hz notch at fs = 104 Hz was a no-op stage.
 
 ## Decision
+
 * One Welch PSD per gyro axis (2 s Hann segments, 50 % overlap, nfft 1024) on the
   mean-removed raw window; axes summed (orientation-independent, as in ParaDigMa).
 * Peak in 3.5–7.5 Hz refined by Gaussian interpolation; tremor power = ±0.625 Hz around it;
@@ -25,10 +27,12 @@
   robustness.
 
 ## Validation
-Synthetic suite (16 seeds × 10 scenarios): strong-tremor detection 38 % → 98 %; frequency
-error median 0.11 → 0.08 Hz; band_ratio separates 1 Hz movement (< 0.05) from 5 Hz tremor
+
+Synthetic suite (16 seeds × 10 scenarios, final pipeline 3.0.0 run — `benchmarks/results/`):
+strong-tremor detection 38 % → 97 %; frequency error median 0.090 → 0.024 Hz; band_ratio separates 1 Hz movement (< 0.05) from 5 Hz tremor
 (> 0.8) (`tests/unit/test_features_and_detector.py`). Not validated on labelled patient data.
 
 ## Consequences
+
 `band_ratio`, `frequency_std`, `axis_agreement` keep their column names but have new, documented
 definitions → pipeline 3.0.0; 2.x recordings must be re-processed (replay) to compare.

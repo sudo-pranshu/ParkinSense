@@ -15,7 +15,7 @@ How it stays faithful:
   * all temporal logic runs on device time, so speed does not affect output.
     `--realtime` only paces delivery for visual inspection.
 
-Supported inputs (auto-detected; docs/validation/REPLAY_AND_DATASETS.md):
+Supported inputs (auto-detected; docs/datasets/REPLAY_AND_DATASETS.md):
   * capture schema v3 (`capture.csv`, this runtime)
   * capture schema v2 (`realtime_capture_v2.csv`, runtime 2.x)
   * BLE v1 raw logs (`timestamp, ax..gz, ir, red, packet_version`; timestamp in us)
