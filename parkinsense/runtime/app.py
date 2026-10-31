@@ -29,6 +29,7 @@ from parkinsense.runtime.recorder import SessionRecorder, _jsonable_metrics, ato
 DEVICE_NAME = "ParkinSense"
 SERVICE_UUID = "ABCD1234-0000-467A-9538-01F0652C74E0"
 CHAR_UUID = "ABCD1234-0001-467A-9538-01F0652C74E0"
+FIRMWARE_REV_UUID = "00002a26-0000-1000-8000-00805f9b34fb"   # DIS Firmware Revision String
 RECONNECT_DELAY_S = 3.0
 METADATA_EVERY_S = 10.0
 
@@ -78,31 +79,37 @@ async def run_session(args, live: LiveState, stop: asyncio.Event) -> None:
         log.warning("device not found")
         return
 
-    engine = RuntimeEngine(firmware_version=args.firmware_version)
     disconnected = asyncio.Event()
-    with SessionRecorder(engine, root=args.out, device={"address": device.address, "name": device.name},
-                         notes=args.notes) as rec:
-        log.info("recording to %s", rec.dir)
-        last_meta = time.monotonic()
+    async with BleakClient(device, disconnected_callback=lambda _c: disconnected.set()) as client:
+        log.info("connected: %s", device.address)
+        fw = args.firmware_version
+        if fw == "unknown":
+            try:   # Device Information Service, firmware >= 5.0.0
+                fw = (await client.read_gatt_char(FIRMWARE_REV_UUID)).decode(errors="replace").strip("\x00 ")
+            except Exception:
+                log.info("firmware revision not available (pre-5.0 firmware); recording 'unknown'")
+        engine = RuntimeEngine(firmware_version=fw)
+        with SessionRecorder(engine, root=args.out, device={"address": device.address, "name": device.name},
+                             notes=args.notes) as rec:
+            log.info("recording to %s (firmware %s)", rec.dir, fw)
+            last_meta = time.monotonic()
 
-        def on_notify(_sender, data: bytearray):
-            nonlocal last_meta
-            res = engine.process_packet(bytes(data))
-            if res.rows:
-                rec.write_rows(res.rows)
-            if res.analyses:
-                m = _jsonable_metrics(res.analyses[-1])
-                m["status"] = "STREAMING"
-                m["capture_path"] = str(rec.dir / "capture.csv")
-                live.set(m)
-                atomic_write_json(args.metrics_file, m)
-            now = time.monotonic()
-            if now - last_meta >= METADATA_EVERY_S:
-                rec.write_metadata()
-                last_meta = now
+            def on_notify(_sender, data: bytearray):
+                nonlocal last_meta
+                res = engine.process_packet(bytes(data))
+                if res.rows:
+                    rec.write_rows(res.rows)
+                if res.analyses:
+                    m = _jsonable_metrics(res.analyses[-1])
+                    m["status"] = "STREAMING"
+                    m["capture_path"] = str(rec.dir / "capture.csv")
+                    live.set(m)
+                    atomic_write_json(args.metrics_file, m)
+                now = time.monotonic()
+                if now - last_meta >= METADATA_EVERY_S:
+                    rec.write_metadata()
+                    last_meta = now
 
-        async with BleakClient(device, disconnected_callback=lambda _c: disconnected.set()) as client:
-            log.info("connected: %s", device.address)
             await client.start_notify(CHAR_UUID, on_notify)
             stop_task = asyncio.create_task(stop.wait())
             disc_task = asyncio.create_task(disconnected.wait())
