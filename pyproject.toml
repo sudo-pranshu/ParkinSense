@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parkinsense"
+version = "3.0.0"
+description = "Open research platform for wrist-worn movement and PPG monitoring (research use only; not a medical device)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "See LICENSE" }
+authors = [{ name = "Pranshu Kumar" }]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+live = ["bleak>=0.21", "fastapi>=0.100", "uvicorn>=0.23"]
+dashboard = ["dash>=2.14", "plotly>=5.18"]
+dev = ["pytest>=7.4", "flake8>=6"]
+
+[project.scripts]
+parkinsense-live = "parkinsense.runtime.app:main"
+parkinsense-replay = "parkinsense.replay.replay:main"
+parkinsense-dataset = "parkinsense.datasets.builder:main"
+
+[tool.setuptools.packages.find]
+include = ["parkinsense*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["hardware: requires a physical ParkinSense device (skipped in CI)"]
+addopts = "-m 'not hardware'"

@@ -1,0 +1,97 @@
+{
+  "normal_motion_60s": {
+    "outputs": {
+      "final_steps": 90,
+      "median_tremor_frequency_hz": null,
+      "median_valid_hr": null,
+      "motion_state_fraction": {
+        "ACTIVE": 0.9454,
+        "LOW MOTION": 0.0546
+      },
+      "tremor_fraction": 0.0,
+      "tremor_rest_fraction": 0.0,
+      "valid_hr_fraction": 0.0
+    },
+    "path": "data/reference/legacy_serial_23hz/normal_motion_60s.csv",
+    "resample": true
+  },
+  "parkinsense_20260630_123551": {
+    "outputs": {
+      "final_steps": 62,
+      "median_tremor_frequency_hz": null,
+      "median_valid_hr": 61.0,
+      "motion_state_fraction": {
+        "ACTIVE": 0.006,
+        "LOW MOTION": 0.5241,
+        "REST": 0.4699
+      },
+      "tremor_fraction": 0.0,
+      "tremor_rest_fraction": 0.0,
+      "valid_hr_fraction": 0.0963855421686747
+    },
+    "path": "data/reference/ble_v1_104hz/parkinsense_20260630_123551.csv",
+    "resample": false
+  },
+  "simulated_tremor_30s": {
+    "outputs": {
+      "final_steps": 83,
+      "median_tremor_frequency_hz": null,
+      "median_valid_hr": null,
+      "motion_state_fraction": {
+        "ACTIVE": 0.4941,
+        "LOW MOTION": 0.5059
+      },
+      "tremor_fraction": 0.0,
+      "tremor_rest_fraction": 0.0,
+      "valid_hr_fraction": 0.0
+    },
+    "path": "data/reference/legacy_serial_23hz/simulated_tremor_30s.csv",
+    "resample": true
+  },
+  "stationary_60s": {
+    "outputs": {
+      "final_steps": 0,
+      "median_tremor_frequency_hz": null,
+      "median_valid_hr": null,
+      "motion_state_fraction": {
+        "REST": 1.0
+      },
+      "tremor_fraction": 0.0,
+      "tremor_rest_fraction": 0.0,
+      "valid_hr_fraction": 0.0
+    },
+    "path": "data/reference/legacy_serial_23hz/stationary_60s.csv",
+    "resample": true
+  },
+  "vibration_reference_30s": {
+    "outputs": {
+      "final_steps": 3,
+      "median_tremor_frequency_hz": null,
+      "median_valid_hr": null,
+      "motion_state_fraction": {
+        "LOW MOTION": 0.5357,
+        "REST": 0.4643
+      },
+      "tremor_fraction": 0.0,
+      "tremor_rest_fraction": 0.0,
+      "valid_hr_fraction": 0.0
+    },
+    "path": "data/reference/legacy_serial_23hz/vibration_reference_30s.csv",
+    "resample": true
+  },
+  "walking_60s": {
+    "outputs": {
+      "final_steps": 69,
+      "median_tremor_frequency_hz": null,
+      "median_valid_hr": null,
+      "motion_state_fraction": {
+        "ACTIVE": 1.0
+      },
+      "tremor_fraction": 0.0,
+      "tremor_rest_fraction": 0.0,
+      "valid_hr_fraction": 0.0
+    },
+    "path": "data/reference/legacy_serial_23hz/walking_60s.csv",
+    "resample": true
+  }
+}

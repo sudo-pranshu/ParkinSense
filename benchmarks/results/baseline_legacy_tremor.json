@@ -1,0 +1,72 @@
+{
+  "impl": "legacy",
+  "synthetic_only": true,
+  "tremor": {
+    "analysis_level": {
+      "tp": 997,
+      "fn": 443,
+      "fp": 63,
+      "tn": 3537,
+      "sensitivity": 0.6923611111111111,
+      "specificity": 0.9825,
+      "precision": 0.940566037735849,
+      "f1": 0.7976,
+      "false_positive_rate": 0.01749999999999996
+    },
+    "segment_level": {
+      "tp": 22,
+      "fn": 10,
+      "fp": 0,
+      "tn": 80,
+      "sensitivity": 0.6875,
+      "specificity": 1.0,
+      "precision": 1.0,
+      "f1": 0.8148148148148148,
+      "false_positive_rate": 0.0
+    },
+    "per_scenario": {
+      "rest_tremor": {
+        "mean_fraction_classified_tremor": 1.0
+      },
+      "strong_tremor": {
+        "mean_fraction_classified_tremor": 0.38472222222222224
+      },
+      "rest": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "voluntary": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "walking": {
+        "mean_fraction_classified_tremor": 0.001388888888888889
+      },
+      "vibration": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "non_pd_oscillation": {
+        "mean_fraction_classified_tremor": 0.08611111111111111
+      },
+      "subtle_tremor": {
+        "mean_fraction_classified_tremor": 1.0
+      },
+      "action_tremor": {
+        "mean_fraction_classified_tremor": 0.4861111111111111
+      },
+      "walking_with_tremor": {
+        "mean_fraction_classified_tremor": 0.9777777777777779
+      }
+    },
+    "sensitivity_by_amplitude": {
+      "8-15 dps": 1.0,
+      "15-30 dps": 1.0,
+      "30-60 dps": 1.0,
+      "60-120 dps": 1.0,
+      "120-250 dps": 0.3847222222222222
+    },
+    "frequency_abs_error_hz": {
+      "median": 0.0903136419988253,
+      "p90": 0.21882251715803597,
+      "n": 28
+    }
+  }
+}

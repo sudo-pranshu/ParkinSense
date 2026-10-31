@@ -1,0 +1,120 @@
+{
+  "impl": "current",
+  "synthetic_only": true,
+  "tremor": {
+    "analysis_level": {
+      "tp": 1428,
+      "fn": 12,
+      "fp": 0,
+      "tn": 3600,
+      "sensitivity": 0.9916666666666667,
+      "specificity": 1.0,
+      "precision": 1.0,
+      "f1": 0.99581589958159,
+      "false_positive_rate": 0.0
+    },
+    "segment_level": {
+      "tp": 32,
+      "fn": 0,
+      "fp": 0,
+      "tn": 80,
+      "sensitivity": 1.0,
+      "specificity": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_positive_rate": 0.0
+    },
+    "per_scenario": {
+      "rest_tremor": {
+        "mean_fraction_classified_tremor": 1.0
+      },
+      "strong_tremor": {
+        "mean_fraction_classified_tremor": 0.9833333333333334
+      },
+      "rest": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "voluntary": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "walking": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "vibration": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "non_pd_oscillation": {
+        "mean_fraction_classified_tremor": 0.0
+      },
+      "subtle_tremor": {
+        "mean_fraction_classified_tremor": 1.0
+      },
+      "action_tremor": {
+        "mean_fraction_classified_tremor": 1.0
+      },
+      "walking_with_tremor": {
+        "mean_fraction_classified_tremor": 1.0
+      }
+    },
+    "sensitivity_by_amplitude": {
+      "8-15 dps": 1.0,
+      "15-30 dps": 1.0,
+      "30-60 dps": 1.0,
+      "60-120 dps": 1.0,
+      "120-250 dps": 0.9833333333333334
+    },
+    "frequency_abs_error_hz": {
+      "median": 0.0240303356232916,
+      "p90": 0.10062270860528622,
+      "n": 32
+    }
+  },
+  "latency": {
+    "onset_latency_s_median": 4.518249999999998,
+    "onset_detected": "8/8",
+    "offset_latency_s_median": 7.016950000000001,
+    "offset_cleared": "8/8"
+  },
+  "steps": {
+    "walking_count_error_pct": {
+      "mean": -54.28879390863579,
+      "mean_abs": 54.28879390863579,
+      "worst": -89.36170212765957
+    },
+    "false_steps_per_minute": {
+      "rest_tremor": 0.0,
+      "voluntary": 46.333333333333336,
+      "rest": 0.0,
+      "vibration": 0.0
+    }
+  },
+  "ppg_v1_path": {
+    "rest_hr_mae_bpm": 0.2920130420661863,
+    "rest_hr_reported_in": "10/10",
+    "rest_hr_coverage": 1.0,
+    "rest_rmssd_mae_ms": null,
+    "rest_rmssd_reported_in": "0/10",
+    "rest_hr_confidence_median": 0.5923999999999999,
+    "motion_hr_mae_bpm": 27.74888757552576,
+    "motion_hr_reported_in": "6/6",
+    "motion_hr_confidence_median": 0.11366666666666665
+  },
+  "ppg_v2_path": {
+    "rest_hr_mae_bpm": 0.3710207608110423,
+    "rest_hr_reported_in": "10/10",
+    "rest_hr_coverage": 1.0,
+    "rest_rmssd_mae_ms": 6.6512875780302725,
+    "rest_rmssd_reported_in": "10/10",
+    "rest_hr_confidence_median": 0.7333500000000001,
+    "motion_hr_mae_bpm": 27.998887575525753,
+    "motion_hr_reported_in": "6/6",
+    "motion_hr_confidence_median": 0.19416666666666668
+  },
+  "cost": {
+    "wall_s_per_60s_signal": 2.350564566999992,
+    "realtime_factor": 25.525782547031902,
+    "analysis_packet_latency_ms_median": 18.73521700008496,
+    "analysis_packet_latency_ms_p95": 27.444050600024635,
+    "analyses_per_minute": 113
+  }
+}
