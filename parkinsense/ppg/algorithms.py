@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import butter, filtfilt, find_peaks, peak_widths
+from scipy.signal import butter, filtfilt, find_peaks
 
 # ---------------------------------------------------------------------------
 # Constants — every threshold below is explained rather than left "magic".
@@ -2265,6 +2265,7 @@ def estimate_spo2(
     cal_c: float = SPO2_CAL_C,
     calibration_table: list[tuple[float, float, float]] | None = None,
     max_roc_per_sec: float = SPO2_MAX_ROC_PCT_PER_SEC,
+    elapsed_sec: float | None = None,
 ) -> dict:
     """
     Beat-by-beat ratio-of-ratios SpO2 estimator with RED/IR alignment
@@ -2292,6 +2293,12 @@ def estimate_spo2(
         (SpO2 = cal_a + cal_b * R + cal_c * R^2). Pass `cal_c=0.0` to
         recover a pure linear curve if desired.
     calibration_table : optional full override, see `_spo2_calibrate`.
+    elapsed_sec : signal time since the previous call. Lock-duration
+        accumulation and the rate-of-change clamp use it. If None (legacy
+        convention) the whole buffer duration is assumed, which is only
+        correct when consecutive calls see non-overlapping buffers; with a
+        10 s buffer analysed every 0.5 s that over-counts time 20x
+        (finding N-1, docs/audit/TRANSFORMATION_REPORT.md).
     max_roc_per_sec : ceiling, in %/second, on how fast the published SpO2
         value may move once locked (a safety clamp, not a physiological
         desaturation-kinetics model — see `SPO2_MAX_ROC_PCT_PER_SEC`).
@@ -2332,6 +2339,7 @@ def estimate_spo2(
         return result
 
     buffer_duration = ir.size / fs
+    step_sec = buffer_duration if elapsed_sec is None else max(0.0, float(elapsed_sec))
 
     # --- Shared context: motion score and band-passed / DC-tracked channels ---
     motion_score = _motion_artifact_score(ir)
@@ -2549,20 +2557,20 @@ def estimate_spo2(
     # single good window) is required to transition into a trusted lock.
     if prior_state in (None, "SEARCHING"):
         if confidence >= SPO2_LOCK_CONFIDENCE_ON:
-            lock_duration_sec += buffer_duration
+            lock_duration_sec += step_sec
         else:
             lock_duration_sec = 0.0
         new_state = "LOCKED" if lock_duration_sec >= SPO2_LOCK_DURATION_REQUIRED_SEC else "SEARCHING"
     elif prior_state in ("LOCKED", "TRACKING"):
         if confidence >= SPO2_LOCK_CONFIDENCE_OFF:
             new_state = "TRACKING"
-            lock_duration_sec += buffer_duration
+            lock_duration_sec += step_sec
         else:
             new_state = "LOST"
             lock_duration_sec = 0.0
     elif prior_state == "LOST":
         if confidence >= SPO2_LOCK_CONFIDENCE_ON:
-            lock_duration_sec += buffer_duration
+            lock_duration_sec += step_sec
         else:
             lock_duration_sec = 0.0
         new_state = "LOCKED" if lock_duration_sec >= SPO2_LOCK_DURATION_REQUIRED_SEC else "SEARCHING"
@@ -2580,7 +2588,7 @@ def estimate_spo2(
         # Rate-limit (per-second ceiling, plus the original fixed per-update
         # jump clamp as an additional safety bound) and confidence-scaled
         # exponential smoothing.
-        max_delta = max(max_roc_per_sec * buffer_duration, 1e-6)
+        max_delta = max(max_roc_per_sec * step_sec, 1e-6)
         clamped = float(np.clip(spo2_raw, prior_spo2 - max_delta, prior_spo2 + max_delta))
         clamped = float(np.clip(
             clamped, prior_spo2 - SPO2_MAX_JUMP_PER_UPDATE, prior_spo2 + SPO2_MAX_JUMP_PER_UPDATE

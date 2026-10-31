@@ -1,142 +1,95 @@
 """
-ParkinSense V2
-Motion Processing Pipeline
+Motion pipeline: one analysis window -> motion context + tremor biomarkers.
+
+Owns only motion processing. PPG is owned by the runtime as a sibling
+(review P2-11): the previous `MotionPipeline` constructed a `PPGProcessor`
+with the wrong default sample rate (audit P0-2) and never passed it the
+motion state (audit P1-5).
+
+Window flow:
+    gyro (3,n) --Welch per axis (raw, mean-removed)--> SpectralFeatures
+    accel (3,n) + arm-band gyro RMS --> MotionContext (excludes tremor band)
+    features + context --> TremorEvidence (per window)
+    evidence + signal time --> TremorHMM (temporal posterior, published)
 """
 
+from __future__ import annotations
+
 import numpy as np
-from dashboard.python.ppg.ppg_processor import PPGProcessor
-from dashboard.python.filters.gravity import GravityRemoval
-from dashboard.python.filters.notch import NotchFilter
-from dashboard.python.filters.bandpass import ButterworthBandpass
 
-from dashboard.python.features.feature_extractor import FeatureExtractor
-from dashboard.python.features.feature_vector import FeatureVector
+from parkinsense.config import SAMPLE_RATE_HZ, Quality
+from parkinsense.motion import features as F
+from parkinsense.motion.context import MotionContext
+from parkinsense.tremor import detector as D
+from parkinsense.tremor.temporal import TremorHMM
 
-from dashboard.python.context.motion_context import MotionContext
-
-from dashboard.python.inference.rule_engine import RuleInferenceEngine
+# A window with more than this fraction of (possibly) clipped samples cannot
+# yield a trustworthy spectrum: clipping/wrap manufactures broadband energy.
+MAX_CLIPPED_FRACTION = 0.02
 
 
 class MotionPipeline:
-
-    def __init__(self, fs=104):
-
+    def __init__(self, fs: float = SAMPLE_RATE_HZ):
         self.fs = fs
+        self.context = MotionContext(fs)
+        self.hmm = TremorHMM()
 
-        self.gravity = GravityRemoval(fs)
+    def reset(self):
+        self.hmm.reset()
 
-        self.notch = NotchFilter(fs)
-
-        self.bandpass = ButterworthBandpass(fs)
-
-        self.extractor = FeatureExtractor(fs)
-
-        self.context = MotionContext()
-
-        self.engine = RuleInferenceEngine()
-        
-        self.ppg = PPGProcessor()
-
-    def ingest_ppg(self, ir, red):
+    def process(self, accel, gyro, t: float, clipped_fraction: float = 0.0,
+                usable: bool = True) -> dict:
         """
-        Feed one raw IR/RED sample pair into the PPG rolling buffer without
-        running any analysis.
-
-        Exposed because PPG ingestion and windowed analysis run on different
-        clocks: the buffer holds the PPG waveform itself and must receive
-        every sample, whereas `process()` is a windowed operation a caller
-        may legitimately run on a slower hop. A caller that drives the two
-        separately should call this per sample and then invoke `process()`
-        with `ir=None, red=None` so the sample is not counted twice.
+        accel, gyro: (3, n) arrays in g and deg/s for one full window.
+        t: signal time (s) of the window's last sample.
+        usable: False when the window is known to be invalid (rate invalid,
+            spans a gap); the HMM then only predicts and outputs are marked.
         """
-        self.ppg.ingest(ir, red)
+        accel = np.asarray(accel, dtype=float)
+        gyro = np.asarray(gyro, dtype=float)
+        feats = F.extract(gyro, self.fs)
+        ctx = self.context.classify(accel, feats.arm_rms_dps)
+        ev = D.evaluate(feats, ctx["state"])
 
-    def preprocess(self, signal):
+        quality = Quality.VALID
+        if clipped_fraction > MAX_CLIPPED_FRACTION:
+            quality = Quality.SENSOR_FAULT
+        if not usable:
+            quality = Quality.DATA_GAP
+        use_ev = ev.evidence if quality == Quality.VALID else None
+        temporal = self.hmm.update(use_ev, t)
 
-        signal = self.notch.filter(signal)
+        published = temporal["confirmed"]
+        if published and quality == Quality.VALID and temporal["probability"] < 0.95:
+            q_out = Quality.LOW_CONFIDENCE.value
+        else:
+            q_out = quality.value
 
-        signal = self.bandpass.filter(signal)
-
-        return signal
-
-    def process(
-        self,
-        ax,
-        ay,
-        az,
-        gx,
-        gy,
-        gz,
-        ir=None,
-        red=None
-    ):
-
-        ax = self.gravity.remove(np.asarray(ax))
-        ay = self.gravity.remove(np.asarray(ay))
-        az = self.gravity.remove(np.asarray(az))
-
-        context = self.context.classify(
-            ax,
-            ay,
-            az
-        )
-
-        gx = self.preprocess(np.asarray(gx))
-        gy = self.preprocess(np.asarray(gy))
-        gz = self.preprocess(np.asarray(gz))
-
-        gx_features = self.extractor.extract(gx)
-        gy_features = self.extractor.extract(gy)
-        gz_features = self.extractor.extract(gz)
-
-        features = {
-            "gx": gx_features,
-            "gy": gy_features,
-            "gz": gz_features
+        result = {
+            # legacy-compatible keys (meanings documented in docs/validation/METRICS.md)
+            "tremor": bool(published),
+            "score": int(round(100 * ev.evidence)),
+            "confidence": round(100 * temporal["probability"], 1),
+            "severity": "NOT_ASSESSED" if published else "NONE",
+            "frequency": round(ev.frequency_hz, 2),
+            "frequency_std": round(feats.frequency_std, 3),
+            "band_ratio": round(feats.band_ratio, 4),
+            "best_axis": feats.best_axis,
+            "axis_agreement": round(feats.axis_agreement, 3),
+            "axis_dominance": round(feats.axis_dominance, 3),
+            "rest_index": round(max(0.0, 1.0 - ctx["motion_rms"] / 0.20), 3),
+            # v3 additions
+            "tremor_state": temporal["state"],
+            "tremor_probability": round(temporal["probability"], 4),
+            "tremor_evidence": round(ev.evidence, 4),
+            "tremor_window_detected": ev.detected_window,
+            "tremor_type": ev.tremor_type if published else "NONE",
+            "tremor_amplitude_dps": round(ev.amplitude_dps, 3),
+            "tremor_power": round(feats.tremor_power, 4),
+            "tremor_snr_db": round(ev.snr_db, 2),
+            "arm_movement_rms_dps": round(feats.arm_rms_dps, 3),
+            "spectral_entropy": round(feats.spectral_entropy, 4),
+            "movement_harmonic": ev.movement_harmonic,
+            "tremor_quality": q_out,
         }
-
-        result = self.engine.predict(
-            features,
-            context
-        )
-        
-        # Ingestion is conditional so a caller that already ingested this
-        # sample via `ingest_ppg()` can pass ir=red=None and get analysis
-        # only, without the sample being appended to the buffer twice.
-        if ir is not None or red is not None:
-            self.ppg.ingest(ir, red)
-
-        ppg = self.ppg.analyze()
-
-        best = features[result["best_axis"]]
-
-        fv = FeatureVector(
-            rms=best["rms"],
-            dominant_frequency=best["dominant_frequency"],
-            band_ratio=best["band_ratio"],
-            spectral_entropy=best["spectral_entropy"],
-            spectral_centroid=best["spectral_centroid"],
-            frequency_std=result["frequency_std"],
-            axis_agreement=result["axis_agreement"],
-            axis_dominance=result["axis_dominance"],
-            best_axis=result["best_axis"],
-            motion_state=context["state"],
-            rest_index=result["rest_index"],
-            features=features
-        )
-
-        result["frequency"]      = float(result["frequency"])
-        result["frequency_std"]  = float(result["frequency_std"])
-        result["band_ratio"]     = float(result["band_ratio"])
-        result["axis_agreement"] = float(result["axis_agreement"])
-        result["axis_dominance"] = float(result["axis_dominance"])
-        result["rest_index"]     = float(result["rest_index"])
-        result["score"]          = int(result["score"])
-        result["confidence"]     = float(result["confidence"])
-
-        return {
-            "feature_vector": fv,
-            "result": result,
-            "context": context,
-            "ppg": ppg
-        }
+        return {"result": result, "context": ctx, "features": feats}

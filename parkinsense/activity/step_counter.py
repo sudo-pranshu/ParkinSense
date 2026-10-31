@@ -1,6 +1,21 @@
+"""
+Default step counter (algorithm v1.1).
+
+v1.1 = the v1.0 adaptive-threshold counter, unchanged in its detection
+logic, plus: signal-time timestamps from the runtime (v1.0 ran on host
+arrival time, quantising intervals to BLE packet spacing), `break_continuity()`
+for data gaps, the canonical `walking_state` key, and MotionState parsing.
+The runtime additionally withholds the moving gate while a rest tremor is
+confirmed (see runtime/engine.py), which removes tremor-driven false steps.
+
+A periodicity-gated rewrite exists in `step_counter_periodic.py`; it did not
+pass the real-recording acceptance check and is not the default.
+"""
 import math
 import time
 from collections import deque
+
+from parkinsense.config import MotionState
 
 
 class StepCounter:
@@ -253,6 +268,21 @@ class StepCounter:
     # Public API
     # ------------------------------------------------------------------
 
+    def break_continuity(self):
+        """
+        Call after a data gap. Ends the current walking bout and re-arms the
+        detector without discarding totals (steps, distance, active minutes),
+        so a cadence/refractory interval is never measured across the gap.
+        """
+        self._above_threshold = False
+        self._last_step_time = None
+        self._recent_step_times.clear()
+        self._consecutive_step_count = 0
+        self._walking_confirmed = False
+        self._bout_start_time = None
+        self._bout_qualified = False
+        self._last_update_time = None
+
     def update(self, ax, ay, az, motion_state, now=None, debug=False):
         """
         Feed one accelerometer sample (in g) and the current motion_state
@@ -283,7 +313,8 @@ class StepCounter:
         # sample). LOW MOTION is included because normal/light walking
         # legitimately produces that state; only REST and unrecognized
         # states should block detection.
-        normalized_motion_state = (motion_state or "").strip().upper()
+        parsed = MotionState.parse(motion_state)
+        normalized_motion_state = parsed.value if parsed else (motion_state or "").strip().upper()
         gating_ok = normalized_motion_state in (
             "ACTIVE",
             "WALKING",
@@ -448,4 +479,6 @@ class StepCounter:
             "step_confidence": round(self._last_step_confidence, 3),
             "walking_confidence": round(self._walking_confidence(walking_now), 3),
             "activity_type": "walking" if walking_now else None,
+            # Canonical label, derived once here (review P2-12).
+            "walking_state": "WALKING" if walking_now else "NOT_WALKING",
         }

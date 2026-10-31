@@ -23,6 +23,8 @@ from collections import deque
 
 import numpy as np
 
+from parkinsense.config import MotionState, Quality
+
 from .algorithms import (
     assess_finger_presence,
     classify_sensor_status,
@@ -98,12 +100,34 @@ SPO2_PUBLISH_INTERVAL_SECONDS = 10.0
 # effectively unavailable during ordinary walking. Unrecognized or missing
 # motion states default to no penalty (multiplier 1.0) so the pipeline
 # degrades gracefully as MotionPipeline's vocabulary grows.
+# Keyed by the shared MotionState enum. The previous string keys used
+# "LOW_MOTION" while MotionContext emits "LOW MOTION", so the lookup silently
+# fell through to 1.0 -- and the runtime never passed a motion state at all
+# (audit P1-5). Both are fixed; `MotionState.parse` accepts either spelling.
 MOTION_CONFIDENCE_MULTIPLIERS = {
-    "REST": 1.0,
-    "LOW_MOTION": 0.8,
-    "ACTIVE": 0.5,
-    "RUNNING": 0.2,
+    MotionState.REST: 1.0,
+    MotionState.LOW_MOTION: 0.8,
+    MotionState.ACTIVE: 0.5,
 }
+
+# Accelerometer-assisted artefact check. Periodic wrist motion (arm swing,
+# gait impacts) injects a PPG component at the motion frequency; a beat
+# detector can lock onto it and report the cadence as heart rate. This is
+# the failure mode TROIKA (Zhang, Pi & Liu, IEEE TBME 62(2), 2015) removes by
+# spectral subtraction. We do not subtract -- we *detect* coincidence of the
+# HR fundamental with the motion fundamental or its 2nd harmonic and demote
+# confidence, which is cheap, explainable and cannot fabricate a value.
+MOTION_COUPLING_TOL_HZ = 0.12
+MOTION_COUPLED_CONFIDENCE_FACTOR = 0.25
+
+# A beat-to-beat interval measured on a signal with distinct-sample rate r
+# has quantisation error up to 1/r. At 10 Hz (protocol-v1 firmware) that is
+# +-100 ms -- the same order as RMSSD itself -- so HRV is withheld below this
+# rate rather than reported. HR (an average over many beats) is still valid.
+HRV_MIN_EFFECTIVE_RATE_HZ = 25.0
+
+# Published HR below this overall confidence is marked LOW_CONFIDENCE.
+HR_MIN_PUBLISH_CONFIDENCE = 0.35
 
 
 class PPGProcessor:
@@ -113,7 +137,7 @@ class PPGProcessor:
 
     Usage
     -----
-        proc = PPGProcessor(sample_rate=50, window_seconds=10)
+        proc = PPGProcessor(sample_rate=104, window_seconds=10)
         for ir_sample, red_sample in ble_stream:
             result = proc.process(ir_sample, red_sample)
 
@@ -123,13 +147,13 @@ class PPGProcessor:
 
     def __init__(
         self,
-        sample_rate: int = 50,
+        sample_rate: float = 104.0,
         window_seconds: int = 10,
         hr_ema_alpha: float = HR_EMA_ALPHA_DEFAULT,
     ):
         self.fs = sample_rate
         self.hr_ema_alpha = hr_ema_alpha
-        window_size = sample_rate * window_seconds
+        window_size = int(round(sample_rate * window_seconds))
 
         # Rolling raw-sample buffers. A deque(maxlen=...) gives O(1)
         # amortized append/evict; the O(n) conversion to a numpy array
@@ -177,6 +201,25 @@ class PPGProcessor:
         self._spo2_last_publish_monotonic: float | None = None
         self._latest_valid_spo2: float | None = None
         self._published_spo2: float | None = None
+        # SpO2 lock state, owned per processor instead of the module-level
+        # `_spo2_state` global in algorithms.py (which leaked across
+        # sessions and processors and was never reset by `reset()`).
+        self._spo2_prior: dict = self._fresh_spo2_prior()
+        self._last_analyze_t: float | None = None
+
+    @staticmethod
+    def _fresh_spo2_prior() -> dict:
+        return {"prior_spo2": None, "prior_confidence": 0.0, "prior_state": "SEARCHING",
+                "lock_duration_sec": 0.0}
+
+    def effective_rate_hz(self) -> float | None:
+        """Distinct-sample rate of the IR channel (value changes per second)."""
+        n = len(self._ir_buffer)
+        if n < 2:
+            return None
+        arr = np.fromiter(self._ir_buffer, dtype=np.float64, count=n)
+        changes = int(np.count_nonzero(np.diff(arr)))
+        return changes / (n / self.fs)
 
     def reset(self) -> None:
         """Clear all buffers and state, e.g. after a sensor reattachment event."""
@@ -192,6 +235,8 @@ class PPGProcessor:
         self._spo2_last_publish_monotonic = None
         self._latest_valid_spo2 = None
         self._published_spo2 = None
+        self._spo2_prior = self._fresh_spo2_prior()
+        self._last_analyze_t = None
 
     def ingest(self, ir: int | None, red: int | None) -> None:
         """
@@ -285,7 +330,8 @@ class PPGProcessor:
         self.ingest(ir, red)
         return self.analyze(motion_state=motion_state, debug=debug)
 
-    def analyze(self, motion_state: str | None = None, debug: bool = False) -> dict:
+    def analyze(self, motion_state: str | None = None, debug: bool = False,
+                now: float | None = None, motion_frequencies_hz=None) -> dict:
         """
         Run the full windowed analysis over the currently buffered samples
         and return one processed reading.
@@ -296,8 +342,18 @@ class PPGProcessor:
         which entry point the caller used.
 
         See `process()` for the full parameter and return-value contract.
+
+        now : signal time in seconds. All hysteresis / throttling / lock
+            timing uses it, so replay at any speed is deterministic. Defaults
+            to time.monotonic() for backward compatibility.
+        motion_frequencies_hz : dominant wrist-motion frequencies from the
+            motion pipeline, for the motion-coupling check.
         """
-        now_monotonic = time.monotonic()
+        now_monotonic = time.monotonic() if now is None else float(now)
+        elapsed = None if self._last_analyze_t is None else max(0.0, now_monotonic - self._last_analyze_t)
+        self._last_analyze_t = now_monotonic
+        motion_enum = MotionState.parse(motion_state)
+        eff_rate = self.effective_rate_hz()
 
         # Single conversion to numpy arrays per call — every downstream
         # algorithm reuses these instead of re-converting the deque itself.
@@ -343,6 +399,7 @@ class PPGProcessor:
             # start of a new physiological session. Idempotent, so it costs
             # nothing to re-apply on each analysis while the finger stays off.
             if held_for >= SESSION_RESET_SECONDS:
+                self._spo2_prior = self._fresh_spo2_prior()
                 self._hr_ema = None
                 self._hr_outlier_reject_since = None
                 self._latest_valid_spo2 = None
@@ -371,6 +428,8 @@ class PPGProcessor:
         }
         hrv = {"rmssd": None, "sdnn": None, "mean_rr": None, "pnn50": None, "n_intervals": 0}
         hr_debug: dict | None = None
+        motion_coupled = False
+        spo2_result: dict = {}
 
         if finger_detected:
             # --- Heart rate: raw per-window estimate -> EMA smoothing ---
@@ -439,7 +498,15 @@ class PPGProcessor:
             # a single harsh on/off penalty. Unrecognized/missing motion
             # states fall through to a 1.0 (no-op) multiplier, so this
             # stays a strict addition for existing callers.
-            overall_hr_confidence *= MOTION_CONFIDENCE_MULTIPLIERS.get(motion_state, 1.0)
+            overall_hr_confidence *= MOTION_CONFIDENCE_MULTIPLIERS.get(motion_enum, 1.0)
+
+            if raw_heart_rate is not None and motion_frequencies_hz:
+                f_hr = raw_heart_rate / 60.0
+                for fm in motion_frequencies_hz:
+                    if fm and any(abs(f_hr - k * fm) <= MOTION_COUPLING_TOL_HZ for k in (1, 2)):
+                        motion_coupled = True
+                if motion_coupled:
+                    overall_hr_confidence *= MOTION_COUPLED_CONFIDENCE_FACTOR
 
             hr_quality = {
                 "peak_quality": round(peak_quality, 3),
@@ -452,9 +519,21 @@ class PPGProcessor:
 
             # --- HRV, reusing the RR intervals already computed above ---
             hrv = compute_hrv_metrics(rr_intervals_ms)
+            if eff_rate is not None and eff_rate < HRV_MIN_EFFECTIVE_RATE_HZ:
+                hrv = {"rmssd": None, "sdnn": None, "mean_rr": hrv.get("mean_rr"), "pnn50": None,
+                       "n_intervals": hrv.get("n_intervals", 0),
+                       "withheld_reason": f"PPG effective rate {eff_rate:.1f} Hz < {HRV_MIN_EFFECTIVE_RATE_HZ} Hz"}
 
             # --- SpO2: computed every call, published on a slower cadence ---
-            spo2_result = estimate_spo2(ir_arr, red_arr, self.fs)
+            spo2_result = estimate_spo2(ir_arr, red_arr, self.fs, elapsed_sec=elapsed,
+                                        **self._spo2_prior)
+            new_state = spo2_result.get("state", "SEARCHING")
+            self._spo2_prior["prior_state"] = new_state
+            self._spo2_prior["lock_duration_sec"] = spo2_result.get("lock_duration_sec", 0.0)
+            if new_state in ("LOCKED", "TRACKING") or self._spo2_prior["prior_spo2"] is None:
+                if spo2_result.get("spo2") is not None:
+                    self._spo2_prior["prior_spo2"] = spo2_result["spo2"]
+                    self._spo2_prior["prior_confidence"] = spo2_result["confidence"]
             spo2_confidence = spo2_result["confidence"]
             if spo2_result["spo2"] is not None:
                 self._latest_valid_spo2 = spo2_result["spo2"]
@@ -480,6 +559,17 @@ class PPGProcessor:
             0.0, 1.0,
         ))
 
+        if not finger_detected:
+            hr_state = Quality.NO_CONTACT.value
+        elif heart_rate is None:
+            hr_state = Quality.INSUFFICIENT_DATA.value
+        elif motion_coupled:
+            hr_state = Quality.MOTION_ARTIFACT.value
+        elif hr_quality["overall_confidence"] < HR_MIN_PUBLISH_CONFIDENCE:
+            hr_state = Quality.LOW_CONFIDENCE.value
+        else:
+            hr_state = Quality.VALID.value
+
         return {
             "finger_detected": finger_detected,
             "signal_quality": quality["score"],
@@ -502,4 +592,10 @@ class PPGProcessor:
             "monotonic_timestamp": now_monotonic,
             "motion_state": motion_state,
             "hr_debug": hr_debug,
+            # --- v2.0 (pipeline 3.0.0) additions ---
+            "hr_quality_state": hr_state,
+            "ppg_effective_rate_hz": None if eff_rate is None else round(eff_rate, 2),
+            "motion_coupled_hr": motion_coupled,
+            "spo2_state": self._spo2_prior["prior_state"],
+            "spo2_r_value": spo2_result.get("r_value") if finger_detected else None,
         }

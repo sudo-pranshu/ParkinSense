@@ -1,3 +1,18 @@
+"""
+Live Plotly Dash dashboard (http://127.0.0.1:8050).
+
+    python -m parkinsense.visualization.dashboard
+
+Reads the runtime's atomic metrics JSON and the *tail* of the current
+session's capture (located through recordings/latest.json or the metrics'
+`capture_path`). v2 re-read the entire capture CSV every 100 ms, which grows
+by ~100 rows/s and made the dashboard unusable within about an hour.
+
+Quality: every biomarker card shows its quality state; values whose state is
+not VALID are shown greyed with the reason instead of as a plain number.
+"""
+
+import io
 import json
 import os
 
@@ -10,8 +25,44 @@ from dash import html
 from dash.dependencies import Input
 from dash.dependencies import Output
 
-METRICS_FILE = "realtime_metrics_v2.json"
-CSV_FILE = "realtime_capture_v2.csv"
+METRICS_FILE = os.environ.get("PARKINSENSE_METRICS", "realtime_metrics_v2.json")
+LATEST_POINTER = os.environ.get("PARKINSENSE_LATEST", "recordings/latest.json")
+LEGACY_CSV_FILE = "realtime_capture_v2.csv"
+TAIL_BYTES = 2_500_000          # ~70 s of v3 rows; bounded read regardless of file size
+_last_good_metrics: dict = {}
+
+
+def capture_path(metrics):
+    p = metrics.get("capture_path")
+    if p and os.path.exists(p):
+        return p
+    try:
+        with open(LATEST_POINTER) as f:
+            return json.load(f)["capture"]
+    except (OSError, ValueError, KeyError):
+        return LEGACY_CSV_FILE if os.path.exists(LEGACY_CSV_FILE) else None
+
+
+def read_tail(path, nbytes=TAIL_BYTES):
+    """Header + last `nbytes` of a growing CSV, without reading the whole file."""
+    with open(path, "rb") as f:
+        header = f.readline()
+        size = os.fstat(f.fileno()).st_size
+        start = max(len(header), size - nbytes)
+        f.seek(start)
+        chunk = f.read()
+    if start > len(header):
+        chunk = chunk.split(b"\n", 1)[-1]         # drop the partial first line
+    lines = chunk.rsplit(b"\n", 1)[0] if not chunk.endswith(b"\n") else chunk
+    return pd.read_csv(io.BytesIO(header + lines), low_memory=False)
+
+
+def quality_value(value, state, unit=""):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return f"-- ({state or 'NO DATA'})"
+    if state and state != "VALID":
+        return f"{value}{unit} ({state})"
+    return f"{value}{unit}"
 
 # How much recent history the trend graphs (gyro, vitals, cadence) show.
 # Windowed by actual elapsed time (via the sample_timestamp_us column)
@@ -70,14 +121,16 @@ app.layout = html.Div(
 )
 def update_dashboard(_):
 
-    metrics = {}
-
-    if os.path.exists(METRICS_FILE):
-        try:
-            with open(METRICS_FILE, "r") as f:
-                metrics = json.load(f)
-        except:
-            metrics = {}
+    global _last_good_metrics
+    metrics = _last_good_metrics
+    try:
+        with open(METRICS_FILE, "r") as f:
+            metrics = json.load(f)
+        _last_good_metrics = metrics
+    except FileNotFoundError:
+        metrics = {}
+    except (OSError, json.JSONDecodeError):
+        pass                      # keep the previous frame rather than blanking (review P2-10)
 
     # ----------------------------------------------------------------
     # Cards, grouped into three sections for readability. Grouping is
@@ -100,16 +153,20 @@ def update_dashboard(_):
             f"{metrics.get('dominant_frequency',0)} Hz"
         ),
         create_card(
-            "Severity",
-            metrics.get("severity", "-")
+            "Amplitude",
+            f"{metrics.get('tremor_amplitude_dps', 0)} °/s"
         ),
         create_card(
-            "Burden",
-            f"{metrics.get('tremor_burden',0):.1f}%"
+            "Tremor State",
+            metrics.get("tremor_state", "-")
         ),
         create_card(
-            "Confidence",
-            f"{metrics.get('confidence',0)}%"
+            "P(tremor)",
+            f"{100 * (metrics.get('tremor_probability') or 0):.0f}%"
+        ),
+        create_card(
+            "Data Quality",
+            f"{metrics.get('tremor_quality', '-')} / rate {metrics.get('rate_status', '-')}"
         ),
         create_card(
             "Motion",
@@ -159,11 +216,11 @@ def update_dashboard(_):
     vitals_cards = [
         create_card(
             "Heart Rate",
-            f"{metrics.get('heart_rate', '--')} BPM"
+            quality_value(metrics.get("heart_rate"), metrics.get("hr_quality_state"), " BPM")
         ),
         create_card(
             "SpO₂",
-            f"{metrics.get('spo2', '--')} %"
+            quality_value(metrics.get("spo2"), "UNCALIBRATED ESTIMATE", " %")
         ),
         create_card(
             "Finger",
@@ -182,9 +239,10 @@ def update_dashboard(_):
     vitals_fig = go.Figure()
     cadence_fig = go.Figure()
 
-    if os.path.exists(CSV_FILE):
+    cap = capture_path(metrics)
+    if cap and os.path.exists(cap):
         try:
-            df_full = pd.read_csv(CSV_FILE)
+            df_full = read_tail(cap)
 
             # Restrict trend graphs to the last HISTORY_SECONDS of actual
             # elapsed time (using the on-device sample timestamp), rather
@@ -292,8 +350,8 @@ def update_dashboard(_):
                 )
             )
 
-        except Exception:
-            pass
+        except (OSError, ValueError, KeyError, pd.errors.ParserError) as e:
+            print(f"dashboard: could not read capture tail: {e}")
 
     gyro_fig.update_layout(
         template="plotly_dark",
@@ -420,6 +478,6 @@ def create_card(title, value):
 
 if __name__ == "__main__":
     app.run(
-        debug=True,
+        debug=False,
         port=8050
     )

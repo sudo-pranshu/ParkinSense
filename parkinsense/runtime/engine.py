@@ -1,731 +1,345 @@
-import asyncio
-import csv
-import struct
+"""
+RuntimeEngine -- the single processing core for live, replay and tests.
+
+Design rules (docs/decisions/0006-runtime-engine.md):
+
+* No I/O, no globals, no wall clock in the processing path. Importing this
+  module has no side effects (the v2 runtime truncated its capture file on
+  import -- review P0-1).
+* All temporal logic runs on *signal time* derived from the device's
+  unwrapped micros() timestamps, so a recording replayed at any speed
+  produces identical outputs (deterministic replay, review P1-5).
+* Two clocks (ADR-0001): per-sample consumers (PPG buffer, step counter, raw
+  capture) see every sample; windowed analysis runs every ANALYSIS_HOP.
+* Every capture row says whether it carries a fresh analysis
+  (`is_analysis_row`, `analysis_seq`) -- review P0-2.
+* Stream integrity is measured, not assumed: timestamp wrap (P1-10),
+  sequence gaps (v2, P1-8), timestamp gaps (any version), measured device
+  sample rate vs nominal (P0-4). Long gaps reset windowed state (P2-13).
+* Analysis exceptions are counted and surfaced, never swallowed (P1-7).
+"""
+
+from __future__ import annotations
+
+import logging
 import time
-import json
-from dataclasses import dataclass, field
-from fastapi import FastAPI
-import threading
-import uvicorn
-from bleak import BleakScanner
-from bleak import BleakClient
+import traceback
+import uuid
 from collections import deque
-from dashboard.python.pipelines.motion_pipeline import MotionPipeline
-from dashboard.python.activity.step_counter import StepCounter
+from dataclasses import dataclass, field
 
-DEVICE_NAME = "ParkinSense"
+import numpy as np
 
-# Bumped whenever the runtime/pipeline processing logic changes in a way
-# that would affect how a captured dataset should be interpreted later.
-#
-# 2.2.0 -- windowed analysis moved from per-sample to a fixed hop
-#          (ANALYSIS_HOP_SAMPLES). This changed the analysis rate by ~200x,
-#          redefined every TremorStateMachine threshold from samples to
-#          seconds, and corrected PPG finger hysteresis from 0.48 s to its
-#          declared 1.0 s. Recordings made under 2.1.0 and 2.2.0 are NOT
-#          interpretable under the same temporal assumptions. See
-#          docs/adr/0001 and docs/adr/0002.
-PIPELINE_VERSION = "2.2.0"
+from parkinsense import config as C
+from parkinsense.activity.step_counter import StepCounter
+from parkinsense.activity.step_counter_periodic import PeriodicStepCounter
+from parkinsense.motion.pipeline import MotionPipeline
+from parkinsense.ppg.processor import PPGProcessor
+from parkinsense.protocol import packet as P
 
-# Firmware version isn't queryable over BLE yet, so this is a manual
-# placeholder -- update it to match whatever firmware build is flashed
-# on the XIAO nRF52840 Sense when a capture is taken.
-FIRMWARE_VERSION = "unknown"
+log = logging.getLogger("parkinsense.runtime")
 
-# Versioned independently from PIPELINE_VERSION because the step-counting
-# and PPG (heart rate / SpO2 / HRV) algorithms evolve on their own
-# schedules. Bump whichever one changes so a dataset always records
-# exactly which algorithm version produced its step/vitals columns,
-# even if the rest of the pipeline is untouched.
-STEP_COUNTER_VERSION = "1.0"
-PPG_VERSION = "1.0"
+MAX_CONSECUTIVE_ANALYSIS_ERRORS = 20
+RATE_ESTIMATE_PACKETS = 100          # ~10 s of header timestamps
 
-SERVICE_UUID = "ABCD1234-0000-467A-9538-01F0652C74E0"
-CHAR_UUID = "ABCD1234-0001-467A-9538-01F0652C74E0"
+# Capture schema v3. The first 52 columns are the v2 schema in its original
+# order (append-only evolution: name-based readers of v2 files keep working).
+LEGACY_COLUMNS = [
+    "timestamp", "sample_timestamp_us",
+    "ax", "ay", "az", "gx", "gy", "gz", "ir", "red",
+    "classification", "tremor_score", "confidence", "severity", "dominant_frequency",
+    "frequency_std", "band_ratio", "best_axis", "axis_agreement", "axis_dominance", "rest_index",
+    "motion_state", "motion_rms",
+    "steps", "cadence", "step_rate_hz", "walking_state", "distance_m", "active_minutes",
+    "step_confidence", "walking_confidence", "activity_type",
+    "heart_rate", "spo2", "hr_confidence", "spo2_confidence", "signal_quality", "sensor_status",
+    "finger_detected",
+    "rmssd", "sdnn", "mean_rr", "pnn50",
+    "sample_count", "packet_count", "sampling_rate",
+    "packet_version", "flags",
+    "pipeline_version", "firmware_version", "step_counter_version", "ppg_version",
+]
+V3_COLUMNS = [
+    "session_id", "host_monotonic", "device_time_us", "packet_seq", "packets_lost",
+    "gap_before_s", "possibly_clipped",
+    "is_analysis_row", "analysis_seq",
+    "tremor_state", "tremor_probability", "tremor_evidence", "tremor_type",
+    "tremor_amplitude_dps", "tremor_power", "tremor_snr_db", "arm_movement_rms_dps",
+    "tremor_quality",
+    "hr_quality_state", "ppg_effective_rate_hz", "motion_coupled_hr",
+    "device_rate_hz", "rate_status",
+    "nominal_rate_hz", "analysis_hop_samples", "capture_schema_version",
+    "tremor_algorithm_version",
+]
+CAPTURE_COLUMNS = LEGACY_COLUMNS + V3_COLUMNS
+# Columns that hold per-analysis (window-level) values, forward-filled
+# between analyses. Everything else is per-sample or per-packet.
+ANALYSIS_COLUMNS = {
+    "classification", "tremor_score", "confidence", "severity", "dominant_frequency",
+    "frequency_std", "band_ratio", "best_axis", "axis_agreement", "axis_dominance", "rest_index",
+    "motion_state", "motion_rms", "heart_rate", "spo2", "hr_confidence", "spo2_confidence",
+    "signal_quality", "sensor_status", "finger_detected", "rmssd", "sdnn", "mean_rr", "pnn50",
+    "tremor_state", "tremor_probability", "tremor_evidence", "tremor_type",
+    "tremor_amplitude_dps", "tremor_power", "tremor_snr_db", "arm_movement_rms_dps",
+    "tremor_quality", "hr_quality_state", "ppg_effective_rate_hz", "motion_coupled_hr",
+}
 
-SAMPLE_RATE_HZ = 104
-SAMPLE_PERIOD_US = int(1_000_000 / SAMPLE_RATE_HZ)
-
-BATCH_SIZE = 10
-
-# Fixed-point scale factors for the BLE wire format.
-#
-# These MUST match the firmware's packing in parksense_ble_stream_v4.ino
-# (`packet.samples[i].ax = ax_f * 8192.0f`, `.gx = gx_f * 131.0f`). They are
-# a wire-format contract, not a statement about the sensor's configured
-# full-scale range: the firmware converts g/dps -> counts with these factors
-# and the runtime converts straight back, so the round-trip is exact.
-#
-# Note the implied int16 saturation points (+-4 g, +-250 dps). Whether the
-# sensor is actually configured to stay within them is a separate firmware
-# concern and is tracked as its own issue; nothing here can detect or
-# correct a value that already wrapped on the device.
-ACCEL_COUNTS_PER_G = 8192.0
-GYRO_COUNTS_PER_DPS = 131.0
-
-# --- Analysis scheduling ---------------------------------------------------
-#
-# The motion pipeline analyses a WINDOW_SIZE (4 s) buffer. Re-running that
-# analysis on every arriving sample would recompute a 99.8%-identical window
-# 104 times a second, so analysis instead advances by a fixed hop and the
-# most recent result is reused in between.
-#
-# SAMPLE_RATE_HZ // 2 gives a 0.5 s hop: 87.5% overlap between consecutive
-# 4 s windows, and a 2 Hz biomarker update.
-#
-# The binding constraint is *evidence independence*, not CPU. With a 4 s
-# window, fully independent estimates arrive only every 4 s; any shorter hop
-# yields correlated scores that TremorStateMachine nonetheless counts as
-# independent votes. Cost is not the discriminator -- one analysis is ~1-3 ms,
-# so every hop from 0.25 s to 2 s stays under ~1.2% of a core.
-#
-#   hop     overlap   time to CONFIRMED (4 hops)   assessment
-#   0.25 s  93.75%    1.0 s                        four near-duplicate votes
-#   0.50 s  87.50%    2.0 s                        chosen
-#   1.00 s  75.00%    4.0 s                        more latency than needed
-#   2.00 s  50.00%    8.0 s                        risks missing short episodes
-#
-# 50-75% overlap is conventional for windowed inertial analysis (Banos et al.,
-# "Window Size Impact in Human Activity Recognition", Sensors 14(4), 2014).
-# Add the 4 s window fill for cold-start latency: ~6 s to first confirmation.
-#
-# CAUTION -- this constant currently fixes the unit of TremorStateMachine's
-# high_count/low_count, which are hop counts. Changing it silently changes
-# detection latency from a different file. That coupling is a known defect
-# (review P1-6): the state machine should express its thresholds in seconds,
-# after which this becomes a pure cost/responsiveness knob. Until then, treat
-# hop size and state-machine thresholds as one latency budget.
-ANALYSIS_HOP_SAMPLES = SAMPLE_RATE_HZ // 2
-ANALYSIS_HOP_SECONDS = ANALYSIS_HOP_SAMPLES / SAMPLE_RATE_HZ
-
-HEADER_FORMAT = "<BBHI"
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-
-SAMPLE_FORMAT = "<hhhhhhII"
-SAMPLE_SIZE = struct.calcsize(SAMPLE_FORMAT)
 
 @dataclass
-class RuntimeState:
-    """
-    Mutable per-session runtime state.
-
-    Grouped into one object rather than added as further loose module-level
-    globals. The pre-existing globals (buffers, pipeline, CSV handle) are
-    left alone here; fully encapsulating the runtime in a class is a
-    worthwhile change but a separate one, and out of scope for this fix.
-    """
-
-    packet_count: int = 0
-    sample_count: int = 0
-
-    # Samples accumulated since the last windowed analysis. Drives the
-    # ANALYSIS_HOP_SAMPLES schedule.
-    samples_since_analysis: int = 0
-
-    # Most recent motion-context state, carried forward between analyses so
-    # per-sample consumers (StepCounter) always have one to gate against.
-    # None until the first analysis completes.
-    motion_state: str | None = None
-
-    # Most recent step-counter output, refreshed every sample.
-    step_data: dict | None = None
-
-    # Most recent complete metrics dict. Published on /metrics, written to
-    # the JSON file, and forward-filled into every capture row between
-    # analyses. Empty until the first analysis completes.
-    metrics: dict = field(default_factory=dict)
-
-
-state = RuntimeState()
-
-start_time = time.time()
-
-pipeline = MotionPipeline(SAMPLE_RATE_HZ)
-step_counter = StepCounter(sample_rate=SAMPLE_RATE_HZ)
-
-WINDOW_SIZE = SAMPLE_RATE_HZ * 4
-
-ax_buffer = deque(maxlen=WINDOW_SIZE)
-ay_buffer = deque(maxlen=WINDOW_SIZE)
-az_buffer = deque(maxlen=WINDOW_SIZE)
-
-gx_buffer = deque(maxlen=WINDOW_SIZE)
-gy_buffer = deque(maxlen=WINDOW_SIZE)
-gz_buffer = deque(maxlen=WINDOW_SIZE)
-
-METRICS_FILE = "realtime_metrics_v2.json"
-app = FastAPI(title="ParkinSense API")
-
-# Capture-file schema. Named so the header and `_write_capture_row()` are
-# checkable against each other rather than being two independent 60-element
-# literals that can silently drift apart.
-CAPTURE_COLUMNS = [
-    "timestamp",
-    "sample_timestamp_us",
-
-    "ax",
-    "ay",
-    "az",
-
-    "gx",
-    "gy",
-    "gz",
-
-    "ir",
-    "red",
-
-    "classification",
-    "tremor_score",
-    "confidence",
-    "severity",
-    "dominant_frequency",
-    "frequency_std",
-    "band_ratio",
-    "best_axis",
-    "axis_agreement",
-    "axis_dominance",
-    "rest_index",
-
-    "motion_state",
-    "motion_rms",
-
-    "steps",
-    "cadence",
-    "step_rate_hz",
-    "walking_state",
-    "distance_m",
-    "active_minutes",
-    "step_confidence",
-    "walking_confidence",
-    "activity_type",
-
-    "heart_rate",
-    "spo2",
-    "hr_confidence",
-    "spo2_confidence",
-    "signal_quality",
-    "sensor_status",
-    "finger_detected",
-
-    "rmssd",
-    "sdnn",
-    "mean_rr",
-    "pnn50",
-
-    "sample_count",
-    "packet_count",
-    "sampling_rate",
-
-    "packet_version",
-    "flags",
-
-    "pipeline_version",
-    "firmware_version",
-    "step_counter_version",
-    "ppg_version",
-]
-
-csv_file = open(
-    "realtime_capture_v2.csv",
-    "w",
-    newline=""
-)
-
-writer = csv.writer(csv_file)
-writer.writerow(CAPTURE_COLUMNS)
-
-
-@app.get("/metrics")
-def get_metrics():
-    return state.metrics
-
-def _write_capture_row(
-    timestamp_us, ax, ay, az, gx, gy, gz, ir_raw, red_raw, version, flags
-):
-    """
-    Append one capture row.
-
-    Column groups have deliberately different time bases, because the
-    quantities behind them do:
-
-    * **Per-sample (live).** Raw signal, wall clock, runtime counters, and
-      every step-tracking field. `StepCounter` is a per-sample streaming
-      detector, so sampling its output at the analysis rate would quantise
-      step *timing* to the hop -- destroying exactly the resolution gait
-      and cadence analysis depends on.
-    * **Per-analysis (forward-filled).** Tremor, motion-context and PPG
-      biomarkers. These are windowed verdicts; a 4 s window's result was
-      never specific to the single sample whose arrival triggered it, so
-      carrying it forward between analyses is what it always meant
-      implicitly.
-    * **Per-packet.** Packet version and flags, taken from the packet this
-      sample arrived in rather than from the last analysed one.
-
-    Keeping the raw and step columns live is what allows a recording to be
-    re-analysed offline at a different hop and reproduce the same result.
-    """
-    metrics = state.metrics
-    step = state.step_data or {}
-
-    elapsed = max(time.time() - start_time, 1e-6)
-
-    row = [
-        time.time(),
-        timestamp_us,
-
-        ax, ay, az,
-        gx, gy, gz,
-
-        ir_raw, red_raw,
-
-        metrics["classification"],
-        metrics["tremor_score"],
-        metrics["confidence"],
-        metrics["severity"],
-        metrics["dominant_frequency"],
-        metrics["frequency_std"],
-        metrics["band_ratio"],
-        metrics["best_axis"],
-        metrics["axis_agreement"],
-        metrics["axis_dominance"],
-        metrics["rest_index"],
-
-        metrics["motion_state"],
-        metrics["motion_rms"],
-
-        # Live per-sample step fields (see docstring).
-        step.get("steps"),
-        step.get("cadence"),
-        step.get("step_rate_hz"),
-        "WALKING" if step.get("walking") else "NOT_WALKING",
-        step.get("distance_m"),
-        step.get("active_minutes"),
-        step.get("step_confidence"),
-        step.get("walking_confidence"),
-        step.get("activity_type"),
-
-        metrics["heart_rate"],
-        metrics["spo2"],
-        metrics["hr_confidence"],
-        metrics["spo2_confidence"],
-        metrics["signal_quality"],
-        metrics["sensor_status"],
-        metrics["finger_detected"],
-
-        metrics["rmssd"],
-        metrics["sdnn"],
-        metrics["mean_rr"],
-        metrics["pnn50"],
-
-        # Live runtime counters: sample_count must stay usable as a row
-        # index, which a forward-filled snapshot would break.
-        state.sample_count,
-        state.packet_count,
-        round(state.sample_count / elapsed, 2),
-
-        # From the packet this sample actually arrived in.
-        version,
-        flags,
-
-        metrics["pipeline_version"],
-        metrics["firmware_version"],
-        metrics["step_counter_version"],
-        metrics["ppg_version"],
-    ]
-
-    if len(row) != len(CAPTURE_COLUMNS):
-        raise AssertionError(
-            f"capture row has {len(row)} fields but CAPTURE_COLUMNS "
-            f"declares {len(CAPTURE_COLUMNS)}"
-        )
-
-    writer.writerow(row)
-
-
-def _print_status(metrics):
-    """Human-readable status block, emitted once per analysis hop."""
-    print("\n============= PARKINSENSE =============")
-    print(f"Tremor        : {metrics['classification']}")
-    print(f"Score         : {metrics['tremor_score']}/100")
-    print(f"Severity      : {metrics['severity']}")
-    print(f"Frequency     : {metrics['dominant_frequency']} Hz")
-    print(f"Motion        : {metrics['motion_state']}")
-    print(f"Steps         : {metrics['steps']} (cadence {metrics['cadence']} spm / {metrics['step_rate_hz']} Hz)")
-    print(f"Walking       : {metrics['walking_state']}")
-    print(f"Distance      : {metrics['distance_m']} m")
-    print(f"Active Mins   : {metrics['active_minutes']}")
-    print("--------------------------------------")
-    print(f"Heart Rate    : {metrics['heart_rate']} BPM")
-    print(f"SpO2          : {metrics['spo2']} %")
-    print(f"Signal Quality: {metrics['signal_quality']}")
-    print(f"Finger        : {metrics['finger_detected']}")
-    print(f"Sensor Status : {metrics['sensor_status']}")
-    print("--------------------------------------")
-    print(f"RMSSD         : {metrics['rmssd']}")
-    print(f"SDNN          : {metrics['sdnn']}")
-    print(f"Mean RR       : {metrics['mean_rr']}")
-    print(f"pNN50         : {metrics['pnn50']}")
-    print("======================================\n")
-
-
-def notification_handler(sender, data):
-    state.packet_count += 1
-
-    header_size = HEADER_SIZE
-    sample_size = SAMPLE_SIZE
-
-    expected_size = (
-        header_size +
-        BATCH_SIZE * sample_size
-    )
-
-    if len(data) != expected_size:
-        print(
-            f"BAD PACKET: "
-            f"{len(data)} bytes "
-            f"(expected {expected_size})"
-        )
-        return
-
-    (
-        version,
-        flags,
-        reserved,
-        packet_timestamp_us
-    ) = struct.unpack_from(
-        HEADER_FORMAT,
-        data,
-        0
-    )
-
-    offset = header_size
-
-    for i in range(BATCH_SIZE):
-        (
-            ax_raw,
-            ay_raw,
-            az_raw,
-            gx_raw,
-            gy_raw,
-            gz_raw,
-            ir_raw,
-            red_raw
-        ) = struct.unpack_from(
-            SAMPLE_FORMAT,
-            data,
-            offset
-        )
-
-        timestamp_us = (
-            packet_timestamp_us +
-            i * SAMPLE_PERIOD_US
-        )
-
-        ax = ax_raw / ACCEL_COUNTS_PER_G
-        ay = ay_raw / ACCEL_COUNTS_PER_G
-        az = az_raw / ACCEL_COUNTS_PER_G
-
-        gx = gx_raw / GYRO_COUNTS_PER_DPS
-        gy = gy_raw / GYRO_COUNTS_PER_DPS
-        gz = gz_raw / GYRO_COUNTS_PER_DPS
-
-        ax_buffer.append(ax)
-        ay_buffer.append(ay)
-        az_buffer.append(az)
-
-        gx_buffer.append(gx)
-        gy_buffer.append(gy)
-        gz_buffer.append(gz)
-
-        state.sample_count += 1
-
-        # ------------------------------------------------------------------
-        # Per-sample path: streaming consumers that must see every sample.
-        # ------------------------------------------------------------------
-
-        # PPG ingestion is per-sample by necessity: PPGProcessor's rolling
-        # buffer *is* the PPG waveform, so decimating ingestion would
-        # decimate the signal itself. Analysis of that buffer happens on the
-        # slower hop below, which is why ir/red are not passed to process().
-        pipeline.ingest_ppg(ir_raw, red_raw)
-
-        # StepCounter is a per-sample streaming detector (threshold crossing
-        # + hysteresis re-arm + refractory period); skipping samples means
-        # missing steps outright, so it stays outside the hop gate. It is a
-        # deliberate sibling of MotionPipeline rather than something
-        # MotionPipeline calls internally, and it consumes the most recent
-        # motion state -- a 4 s-window context that legitimately changes far
-        # more slowly than the sample rate -- so that a tremor-only,
-        # stationary wrist never registers as steps.
-        if state.motion_state is not None:
-            state.step_data = step_counter.update(
-                ax,
-                ay,
-                az,
-                state.motion_state,
-            )
-
-        # ------------------------------------------------------------------
-        # Per-hop path: windowed analysis over the full buffer.
-        # ------------------------------------------------------------------
-        if len(gx_buffer) >= WINDOW_SIZE:
-            state.samples_since_analysis += 1
-
-            # Run immediately once the window first fills (so there is no
-            # dead period before any metrics exist), and on the fixed hop
-            # thereafter.
-            if state.samples_since_analysis >= ANALYSIS_HOP_SAMPLES or not state.metrics:
-                state.samples_since_analysis = 0
-
-                result = pipeline.process(
-                    list(ax_buffer),
-                    list(ay_buffer),
-                    list(az_buffer),
-                    list(gx_buffer),
-                    list(gy_buffer),
-                    list(gz_buffer),
-                    ir=None,
-                    red=None,
-                )
-
-                analysis = result["result"]
-                context  = result["context"]
-                ppg      = result["ppg"]
-
-                state.motion_state = context["state"]
-
-                # Prime the step counter on the very first analysis: the
-                # per-sample gate above skips it until a motion state
-                # exists, so without this the first metrics dict would have
-                # no step fields to report.
-                if state.step_data is None:
-                    state.step_data = step_counter.update(
-                        ax, ay, az, state.motion_state
-                    )
-                step_data = state.step_data
-
-                metrics = {
-                    # ===============================
-                    # Tremor
-                    # ===============================
-                    "classification": (
-                        "TREMOR"
-                        if analysis["tremor"]
-                        else "NO TREMOR"
-                    ),
-                    "tremor_score": int(analysis["score"]),
-                    "confidence": round(
-                        float(analysis["confidence"]),
-                        3
-                    ),
-                    "severity": analysis["severity"],
-                    "dominant_frequency": round(
-                        float(analysis["frequency"]),
-                        2
-                    ),
-                    "frequency_std": round(
-                        float(analysis["frequency_std"]),
-                        2
-                    ),
-                    "band_ratio": round(
-                        float(analysis["band_ratio"]),
-                        3
-                    ),
-                    "best_axis": analysis["best_axis"],
-                    "axis_agreement": round(
-                        float(analysis["axis_agreement"]),
-                        3
-                    ),
-                    "axis_dominance": round(
-                        float(analysis["axis_dominance"]),
-                        3
-                    ),
-                    "rest_index": round(
-                        float(analysis["rest_index"]),
-                        3
-                    ),
-                    # ===============================
-                    # Motion
-                    # ===============================
-                    "motion_state": context["state"],
-                    "motion_rms": round(
-                        float(context["motion_rms"]),
-                        3
-                    ),
-                    # ===============================
-                    # Steps
-                    # ===============================
-                    "steps": step_data["steps"],
-                    "cadence": step_data["cadence"],
-                    "step_rate_hz": step_data["step_rate_hz"],
-                    # Canonical activity-state field. The dashboard and
-                    # CSV both key off this single string rather than
-                    # keeping a separate boolean in sync alongside it.
-                    "walking_state": (
-                        "WALKING"
-                        if step_data["walking"]
-                        else "NOT_WALKING"
-                    ),
-                    "distance_m": step_data["distance_m"],
-                    "active_minutes": step_data["active_minutes"],
-                    "step_confidence": step_data["step_confidence"],
-                    "walking_confidence": step_data["walking_confidence"],
-                    "activity_type": step_data["activity_type"],
-                    # ===============================
-                    # Heart Rate
-                    # ===============================
-                    "heart_rate": ppg.get("heart_rate"),
-                    "signal_quality": ppg.get("signal_quality"),
-                    "sensor_status": ppg.get("sensor_status"),
-                    "finger_detected": ppg.get("finger_detected"),
-                    "hr_confidence": ppg.get("hr_confidence"),
-                    "spo2": ppg.get("spo2"),
-                    "spo2_confidence": ppg.get("spo2_confidence"),
-                    # ===============================
-                    # HR Quality
-                    # ===============================
-                    "hr_quality": ppg.get("hr_quality", {}),
-                    # ===============================
-                    # HRV
-                    # ===============================
-                    "rmssd": ppg.get("hrv", {}).get("rmssd"),
-                    "sdnn": ppg.get("hrv", {}).get("sdnn"),
-                    "mean_rr": ppg.get("hrv", {}).get("mean_rr"),
-                    "pnn50": ppg.get("hrv", {}).get("pnn50"),
-                    # ===============================
-                    # Raw PPG
-                    # ===============================
-                    "latest_ir": int(ppg["ir"])
-                    if ppg["ir"] is not None
-                    else 0,
-                    "latest_red": int(ppg["red"])
-                    if ppg["red"] is not None
-                    else 0,
-                    # ===============================
-                    # Runtime
-                    # ===============================
-                    "sample_count": state.sample_count,
-                    "packet_count": state.packet_count,
-                    "sampling_rate": round(
-                        state.sample_count /
-                        max(
-                            time.time() - start_time,
-                            1e-6
-                        ),
-                        2
-                    ),
-                    "packet_version": version,
-                    "flags": flags,
-                    "timestamp": ppg.get("timestamp"),
-                    "motion_pipeline_state": context["state"],
-                    # ===============================
-                    # Versioning / Provenance
-                    # ===============================
-                    "pipeline_version": PIPELINE_VERSION,
-                    "firmware_version": FIRMWARE_VERSION,
-                    "step_counter_version": STEP_COUNTER_VERSION,
-                    "ppg_version": PPG_VERSION
-                }
-
-                # Publish this hop's metrics for the /metrics endpoint.
-                # A .copy() is used (rather than a reference) so a
-                # concurrent HTTP GET on the uvicorn thread can't see a
-                # dict that's still being mutated on the BLE thread.
-                state.metrics = metrics.copy()
-
-                with open(METRICS_FILE, "w") as f:
-                    json.dump(metrics, f, indent=2)
-
-                _print_status(metrics)
-
-        # Capture row, written per sample so the raw signal columns stay at
-        # the full sample rate. Suppressed until the first analysis has
-        # produced metrics, matching the previous behaviour of emitting
-        # nothing before the window was ready.
-        if state.metrics:
-            _write_capture_row(
-                timestamp_us,
-                ax, ay, az,
-                gx, gy, gz,
-                ir_raw, red_raw,
-                version, flags,
-            )
-
-        offset += sample_size
-
-    # Flush once per packet rather than once per row: bounds worst-case
-    # data loss to a single packet while cutting write syscalls by BATCH_SIZE.
-    csv_file.flush()
-
-    if state.packet_count % 10 == 0:
-        elapsed = (
-            time.time() -
-            start_time
-        )
-        rate = (
-            state.sample_count /
-            elapsed
-        )
-        print(
-            f"Packets={state.packet_count} "
-            f"Samples={state.sample_count} "
-            f"Rate={rate:.1f} Hz"
-        )
-
-async def main():
-    print(
-        "Searching for ParkinSense..."
-    )
-
-    device = await BleakScanner.find_device_by_filter(
-        lambda d, ad:
-        d.name and DEVICE_NAME in d.name
-    )
-
-    if device is None:
-        print("Device not found")
-        return
-
-    print(
-        "Found:",
-        device.address
-    )
-
-    async with BleakClient(device) as client:
-        print("Connected")
-
-        await client.start_notify(
-            CHAR_UUID,
-            notification_handler
-        )
-
-        print("Streaming...")
-
-        while True:
-            await asyncio.sleep(1)
-
-
-def start_api():
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="warning",
-    )
-
-
-if __name__ == "__main__":
-    # Serve /metrics on a background thread so the FastAPI/uvicorn event
-    # loop doesn't block or contend with the asyncio BLE loop in main().
-    threading.Thread(
-        target=start_api,
-        daemon=True,
-    ).start()
-
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        csv_file.close()
-        print(
-            "\nCapture stopped."
-        )
+class PacketResult:
+    rows: list = field(default_factory=list)
+    analyses: list = field(default_factory=list)
+    rejected: str | None = None
+
+
+class RuntimeEngine:
+    def __init__(self, fs: float = C.SAMPLE_RATE_HZ, hop_samples: int = C.ANALYSIS_HOP_SAMPLES,
+                 window_samples: int = C.WINDOW_SAMPLES, firmware_version: str = "unknown",
+                 session_id: str | None = None, step_counter: str = "default"):
+        self.fs = fs
+        self.hop = hop_samples
+        self.window = window_samples
+        self.firmware_version = firmware_version
+        self.session_id = session_id or uuid.uuid4().hex[:12]
+
+        self.motion = MotionPipeline(fs)
+        self.ppg = PPGProcessor(sample_rate=C.PPG_SLOT_RATE_HZ, window_seconds=C.PPG_WINDOW_SECONDS)
+        self.steps = (PeriodicStepCounter if step_counter == "periodic" else StepCounter)(sample_rate=fs)
+        self._step_gate: str | None = None
+
+        self.unwrapper = P.TimestampUnwrapper()
+        self.seq = P.SequenceTracker()
+        self.gaps = P.GapDetector()
+
+        self.packet_count = 0
+        self.bad_packets = 0
+        self.sample_count = 0
+        self.analysis_seq = 0
+        self.analysis_errors = 0
+        self.consecutive_errors = 0
+        self.last_error: str | None = None
+        self.resets = 0
+
+        self._t0_us: int | None = None
+        self._hdr_ts: deque = deque(maxlen=RATE_ESTIMATE_PACKETS)
+        self._host_t0: float | None = None
+        self._buf = deque(maxlen=window_samples)      # (ax, ay, az, gx, gy, gz, clipped)
+        self._since = 0
+        self._motion_state: str | None = None
+        self._step: dict | None = None
+        self.metrics: dict = {}
+        self.versions = set()
+
+    # ------------------------------------------------------------------
+    def reset_windows(self):
+        """Discard windowed/streaming state after a discontinuity."""
+        self._buf.clear()
+        self._since = 0
+        self.motion.reset()
+        self.ppg.reset()
+        self.steps.break_continuity()
+        self.resets += 1
+
+    def device_rate_hz(self) -> float | None:
+        if len(self._hdr_ts) < 10:
+            return None
+        span = self._hdr_ts[-1] - self._hdr_ts[0]
+        if span <= 0:
+            return None
+        return (len(self._hdr_ts) - 1) * P.BATCH_SIZE / (span / 1e6)
+
+    def rate_status(self) -> str:
+        r = self.device_rate_hz()
+        if r is None:
+            return "UNKNOWN"
+        err = abs(r - self.fs) / self.fs
+        if err > C.RATE_INVALID_FRACTION:
+            return "INVALID"
+        if err > C.RATE_WARN_FRACTION:
+            return "WARN"
+        return "OK"
+
+    # ------------------------------------------------------------------
+    def process_packet(self, data: bytes, host_monotonic: float | None = None,
+                       host_wall: float | None = None) -> PacketResult:
+        res = PacketResult()
+        host_monotonic = time.monotonic() if host_monotonic is None else host_monotonic
+        host_wall = time.time() if host_wall is None else host_wall
+        try:
+            pkt = P.decode(data, self.unwrapper)
+        except P.ProtocolError as e:
+            self.bad_packets += 1
+            res.rejected = str(e)
+            log.warning("rejected packet: %s", e)
+            return res
+
+        self.packet_count += 1
+        self.versions.add(pkt.version)
+        if self._host_t0 is None:
+            self._host_t0 = host_monotonic
+        lost = self.seq.update(pkt.seq)
+        first_us = pkt.samples[0].device_time_us
+        gap_s = self.gaps.update(first_us, pkt.samples[-1].device_time_us)
+        if gap_s and gap_s > C.MAX_GAP_BEFORE_RESET_S:
+            self.reset_windows()
+            self._hdr_ts.clear()
+        self._hdr_ts.append(first_us)
+        if self._t0_us is None:
+            self._t0_us = first_us
+
+        for s in pkt.samples:
+            self.sample_count += 1
+            t = (s.device_time_us - self._t0_us) / 1e6
+            self._buf.append((s.ax, s.ay, s.az, s.gx, s.gy, s.gz, s.possibly_clipped))
+            self.ppg.ingest(s.ir, s.red)
+
+            if self._step_gate is not None:
+                self._step = self.steps.update(s.ax, s.ay, s.az, self._step_gate, now=t)
+
+            fresh = False
+            if len(self._buf) >= self.window:
+                self._since += 1
+                if self._since >= self.hop or not self.metrics or self._needs_first_analysis():
+                    self._since = 0
+                    fresh = self._analyse(t, pkt)
+                    if fresh:
+                        res.analyses.append(self.metrics)
+
+            # Every sample is recorded, including the first window's fill
+            # (v2 dropped the first 4 s of raw data of every capture);
+            # analysis columns stay empty until the first analysis.
+            if True:
+                res.rows.append(self._row(s, pkt, t, host_monotonic, host_wall, fresh,
+                                          lost if s.index_in_packet == 0 else 0,
+                                          gap_s if s.index_in_packet == 0 else 0.0))
+        return res
+
+    def _needs_first_analysis(self):
+        return self.metrics.get("_reset_marker") != self.resets
+
+    # ------------------------------------------------------------------
+    def _analyse(self, t: float, pkt: P.Packet) -> bool:
+        try:
+            arr = np.asarray(self._buf, dtype=float)
+            accel, gyro = arr[:, 0:3].T, arr[:, 3:6].T
+            clipped = float(arr[:, 6].mean())
+            rate_ok = self.rate_status() != "INVALID"
+            m = self.motion.process(accel, gyro, t, clipped_fraction=clipped, usable=rate_ok)
+            self._motion_state = m["context"]["state"]
+            # Tremor guard: a confirmed *rest* tremor (no purposeful movement)
+            # is not walking. Withholding the moving gate stops the step
+            # counter converting tremor oscillation into steps -- v1.0
+            # produced ~23 false steps/min of rest tremor (benchmarks).
+            r = m["result"]
+            self._step_gate = ("REST" if r["tremor"] and r["tremor_type"] == "REST"
+                               else self._motion_state)
+            if self._step is None:
+                self._step = self.steps.update(*accel[:, -1], self._step_gate, now=t)
+            motion_freqs = [m["features"].arm_peak_frequency_hz] if m["features"].arm_rms_dps >= 10 else []
+            ppg = self.ppg.analyze(now=t, motion_state=self._motion_state,
+                                   motion_frequencies_hz=motion_freqs)
+            self.analysis_seq += 1
+            self.metrics = self._metrics(m, ppg, pkt, t)
+            self.consecutive_errors = 0
+            return True
+        except Exception:                                    # surfaced, not swallowed
+            self.analysis_errors += 1
+            self.consecutive_errors += 1
+            self.last_error = traceback.format_exc()
+            if self.analysis_errors == 1:
+                log.error("analysis failed:\n%s", self.last_error)
+            if self.consecutive_errors >= MAX_CONSECUTIVE_ANALYSIS_ERRORS:
+                raise RuntimeError(
+                    f"{self.consecutive_errors} consecutive analysis failures; last:\n{self.last_error}")
+            return False
+
+    def _metrics(self, m, ppg, pkt, t) -> dict:
+        r, ctx = m["result"], m["context"]
+        step = self._step or {}
+        hrv = ppg.get("hrv") or {}
+        rate = self.device_rate_hz()
+        return {
+            "_reset_marker": self.resets,
+            "classification": "TREMOR" if r["tremor"] else "NO TREMOR",
+            "tremor_score": r["score"], "confidence": r["confidence"], "severity": r["severity"],
+            "dominant_frequency": r["frequency"], "frequency_std": r["frequency_std"],
+            "band_ratio": r["band_ratio"], "best_axis": r["best_axis"],
+            "axis_agreement": r["axis_agreement"], "axis_dominance": r["axis_dominance"],
+            "rest_index": r["rest_index"],
+            "motion_state": ctx["state"], "motion_rms": round(ctx["motion_rms"], 4),
+            "steps": step.get("steps"), "cadence": step.get("cadence"),
+            "step_rate_hz": step.get("step_rate_hz"), "walking_state": step.get("walking_state"),
+            "distance_m": step.get("distance_m"), "active_minutes": step.get("active_minutes"),
+            "step_confidence": step.get("step_confidence"),
+            "walking_confidence": step.get("walking_confidence"),
+            "activity_type": step.get("activity_type"),
+            "heart_rate": ppg.get("heart_rate"), "spo2": ppg.get("spo2"),
+            "hr_confidence": ppg.get("hr_confidence"), "spo2_confidence": ppg.get("spo2_confidence"),
+            "signal_quality": ppg.get("signal_quality"), "sensor_status": ppg.get("sensor_status"),
+            "finger_detected": ppg.get("finger_detected"),
+            "hr_quality": ppg.get("hr_quality", {}),
+            "rmssd": hrv.get("rmssd"), "sdnn": hrv.get("sdnn"), "mean_rr": hrv.get("mean_rr"),
+            "pnn50": hrv.get("pnn50"),
+            "latest_ir": int(ppg["ir"]) if ppg.get("ir") is not None else 0,
+            "latest_red": int(ppg["red"]) if ppg.get("red") is not None else 0,
+            "sample_count": self.sample_count, "packet_count": self.packet_count,
+            "sampling_rate": round(rate, 3) if rate else None,
+            "packet_version": pkt.version, "flags": pkt.flags,
+            "timestamp": t, "signal_time_s": round(t, 4),
+            "motion_pipeline_state": ctx["state"],
+            "pipeline_version": C.PIPELINE_VERSION, "firmware_version": self.firmware_version,
+            "step_counter_version": C.STEP_COUNTER_VERSION, "ppg_version": C.PPG_VERSION,
+            # v3
+            "analysis_seq": self.analysis_seq,
+            **{k: r[k] for k in ("tremor_state", "tremor_probability", "tremor_evidence", "tremor_type",
+                                 "tremor_amplitude_dps", "tremor_power", "tremor_snr_db",
+                                 "arm_movement_rms_dps", "tremor_quality")},
+            "hr_quality_state": ppg.get("hr_quality_state"),
+            "ppg_effective_rate_hz": ppg.get("ppg_effective_rate_hz"),
+            "motion_coupled_hr": ppg.get("motion_coupled_hr"),
+            "device_rate_hz": round(rate, 3) if rate else None,
+            "rate_status": self.rate_status(),
+            "integrity": self.integrity(),
+        }
+
+    def integrity(self) -> dict:
+        return {
+            "packets": self.packet_count, "bad_packets": self.bad_packets,
+            "packets_lost_seq": self.seq.lost, "loss_fraction_seq": round(self.seq.loss_fraction, 5),
+            "timestamp_gaps": self.gaps.gaps, "missing_samples_est": self.gaps.missing_samples_est,
+            "timestamp_wraps": self.unwrapper.wraps,
+            "timestamp_backward_steps": self.unwrapper.backward_steps,
+            "window_resets": self.resets, "analysis_errors": self.analysis_errors,
+            "protocol_versions": sorted(self.versions),
+        }
+
+    def _row(self, s, pkt, t, host_mono, host_wall, fresh, lost, gap_s) -> dict:
+        m = self.metrics
+        step = self._step or {}
+        row = {k: m.get(k) for k in ANALYSIS_COLUMNS}
+        row.update({
+            "timestamp": host_wall, "sample_timestamp_us": s.device_time_us % P.TIMESTAMP_MODULUS,
+            "ax": s.ax, "ay": s.ay, "az": s.az, "gx": s.gx, "gy": s.gy, "gz": s.gz,
+            "ir": s.ir, "red": s.red,
+            # per-sample step fields (ADR-0003)
+            "steps": step.get("steps"), "cadence": step.get("cadence"),
+            "step_rate_hz": step.get("step_rate_hz"), "walking_state": step.get("walking_state"),
+            "distance_m": step.get("distance_m"), "active_minutes": step.get("active_minutes"),
+            "step_confidence": step.get("step_confidence"),
+            "walking_confidence": step.get("walking_confidence"),
+            "activity_type": step.get("activity_type"),
+            "sample_count": self.sample_count, "packet_count": self.packet_count,
+            "sampling_rate": m.get("sampling_rate"),
+            "packet_version": pkt.version, "flags": pkt.flags,
+            "pipeline_version": C.PIPELINE_VERSION, "firmware_version": self.firmware_version,
+            "step_counter_version": C.STEP_COUNTER_VERSION, "ppg_version": C.PPG_VERSION,
+            "session_id": self.session_id, "host_monotonic": host_mono,
+            "device_time_us": s.device_time_us, "packet_seq": pkt.seq, "packets_lost": lost,
+            "gap_before_s": gap_s, "possibly_clipped": s.possibly_clipped,
+            "is_analysis_row": fresh, "analysis_seq": m.get("analysis_seq"),
+            "device_rate_hz": m.get("device_rate_hz"), "rate_status": m.get("rate_status"),
+            "nominal_rate_hz": self.fs, "analysis_hop_samples": self.hop,
+            "capture_schema_version": C.CAPTURE_SCHEMA_VERSION,
+            "tremor_algorithm_version": C.TREMOR_ALGORITHM_VERSION,
+        })
+        return row
