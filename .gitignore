@@ -22,3 +22,11 @@ build/
 dist/
 realtime_capture*.csv
 realtime_metrics*.json
+
+# Session recordings and replay outputs (personal sensor data -- never commit)
+recordings/
+replays/
+datasets/*/
+.claude_transfer/
+*.egg-info/
+.pytest_cache/

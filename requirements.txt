@@ -1,0 +1,11 @@
+# Runtime + dashboard + tests. Equivalent to: pip install -e ".[live,dashboard,dev]"
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+bleak>=0.21
+fastapi>=0.100
+uvicorn>=0.23
+dash>=2.14
+plotly>=5.18
+pytest>=7.4
+flake8>=6

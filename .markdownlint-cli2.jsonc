@@ -1,0 +1,13 @@
+{
+  // Documentation lint config. Long lines, inline HTML (centred images) and
+  // tables wider than the editor are intentional.
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD033": false,
+    "MD041": false,
+    "MD024": { "siblings_only": true },
+    "MD060": false
+  },
+  "ignores": ["node_modules", ".pytest_cache", "docs/audit/RUNTIME_ARCHITECTURE_REVIEW.md"]
+}

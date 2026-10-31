@@ -1,1000 +1,242 @@
 <div align="center">
 
-# 🧠 ParkinSense
+# ParkinSense
 
-### Continuous Neurological Monitoring & Digital Biomarker Platform
+<p><strong>Open research platform for wrist-worn movement and PPG monitoring</strong></p>
 
-*An open-source wearable research platform for continuous Parkinson's disease monitoring through embedded sensing, physiological analytics, activity recognition, and real-time digital biomarkers.*
+*Continuous IMU + PPG sensing on an nRF52840 wearable, streamed over BLE to a reproducible Python
+pipeline for tremor, heart-rate and activity biomarkers — with explicit quality states, full
+provenance and deterministic replay.*
 
-<br>
+<img src="docs/images/prototype_hand.jpg" alt="ParkinSense prototype worn on the wrist" width="300">
 
-<img src="docs/images/prototype_hand.jpg" width="300">
+![Hardware](https://img.shields.io/badge/Hardware-XIAO_nRF52840_Sense-blue)
+![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20%2B%20MAX30102-red)
+![Pipeline](https://img.shields.io/badge/Pipeline-3.0.0-brightgreen)
+![Protocol](https://img.shields.io/badge/BLE_protocol-v1%20%2B%20v2-informational)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-<br><br>
-
-![Status](https://img.shields.io/badge/Status-Active%20Development-success?style=for-the-badge)
-![Platform](https://img.shields.io/badge/Platform-XIAO_nRF52840_Sense-blue?style=for-the-badge)
-![Sensors](https://img.shields.io/badge/Sensors-LSM6DS3%20%2B%20MAX30102-red?style=for-the-badge)
-![BLE](https://img.shields.io/badge/BLE-5.0%20%40%20104Hz-success?style=for-the-badge)
-![Pipeline](https://img.shields.io/badge/Pipeline-V2.5-brightgreen?style=for-the-badge)
-![Android](https://img.shields.io/badge/Android-Companion_App-3DDC84?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-Runtime-3776AB?style=for-the-badge)
-![License](https://img.shields.io/github/license/sudo-pranshu/ParkinSense?style=for-the-badge)
+**Research use only — not a medical device. No output has been clinically validated.**
 
 </div>
 
 ---
 
-## 📑 Table of Contents
+## Contents
 
-- [At a Glance](#-at-a-glance)
-- [Platform Overview](#-platform-overview)
-- [Why ParkinSense?](#-why-parkinsense)
-- [Why Another Parkinson's Wearable?](#-why-another-parkinsons-wearable)
-- [Core Features](#-core-features)
-- [Development Branches](#-development-branches)
-- [System Architecture](#️-system-architecture)
-- [Design Principles](#-design-principles)
-- [Hardware Platform](#-hardware-platform)
-- [Firmware](#-firmware)
-- [Battery Optimization](#-battery-optimization)
-- [BLE Protocol](#-ble-protocol)
-- [Signal Processing Pipeline](#-signal-processing-pipeline)
-- [Cross-Pipeline Fusion](#-cross-pipeline-fusion)
-- [Digital Biomarkers](#-digital-biomarkers)
-- [Dashboard](#-dashboard)
-- [Android Companion Application](#-android-companion-application)
-- [Repository Structure](#-repository-structure)
-- [Getting Started](#-getting-started)
-- [Performance](#-performance)
-- [Development Roadmap](#️-development-roadmap)
-- [Research Focus](#-research-focus)
-- [Current Limitations](#-current-limitations)
-- [Future Vision](#-future-vision)
-- [Contributing](#-contributing)
-- [Citation](#-citation)
-- [License](#-license)
-- [Disclaimer](#️-disclaimer)
+[Overview](#overview) · [Validation status](#validation-status) · [Hardware](#hardware) ·
+[Architecture](#architecture) · [Algorithms](#key-algorithms) · [Repository](#repository-structure) ·
+[Install](#installation) · [Quick start](#quick-start) · [Testing](#testing) ·
+[Documentation](#documentation) · [Limitations](#limitations) · [Contributing](#contributing) ·
+[Citation](#citation) · [License](#license)
 
-<br>
+## Overview
 
----
+ParkinSense is a wearable research platform for studying Parkinsonian rest tremor and related
+digital biomarkers in everyday life. A Seeed XIAO nRF52840 Sense samples a 6-axis IMU at
+104 Hz and a finger PPG sensor, packs ten samples per 208-byte BLE notification and streams them
+to a Python runtime. The runtime:
 
-## 🚀 At a Glance
+* detects rest tremor and measures its **frequency (Hz)** and **amplitude (deg/s)** from the
+  gyroscope spectrum, with a probabilistic (HMM) temporal filter;
+* classifies motion context (REST / LOW MOTION / ACTIVE) without letting tremor masquerade as
+  movement;
+* estimates **heart rate** and **HRV** from PPG, flags estimates corrupted by motion, and gives an
+  **uncalibrated SpO₂ estimate**;
+* counts steps and cadence;
+* tags every output with a **quality state** and every recording with the firmware, protocol,
+  pipeline and algorithm versions that produced it;
+* records every raw sample, so any session can be **replayed bit-exactly** through any pipeline
+  version.
 
-ParkinSense is an end-to-end wearable platform for continuous neurological monitoring, built on embedded sensing, Bluetooth Low Energy communication, digital signal processing, and real-time analytics.
-
-Unlike most academic prototypes that focus on a single sensing modality or offline analysis, ParkinSense runs **three parallel processing pipelines** — motion, physiological, and activity — from one synchronized sensor stream, and pairs that with a native Android companion app and a live Python dashboard.
-
-The project spans the complete wearable stack: from firmware on a Nordic nRF52840 MCU, through a modular Python signal-processing runtime, to a full Android application capable of on-device biomarker generation.
-
-| | |
-|---|---|
-| 🧠 | Research platform for continuous Parkinson's disease monitoring |
-| 📐 | 6-axis IMU + optical PPG sensor fusion |
-| 📡 | Bluetooth Low Energy 5.0 streaming at ~104 Hz |
-| ❤️ | Heart rate, HRV & SpO₂ estimation |
-| 👣 | Real-time step counting, cadence & activity recognition |
-| 📱 | Native Android companion application |
-| 📊 | Live Plotly Dash dashboard |
-| ⚡ | Power-optimized wearable (~100 hr estimated runtime) |
-| 🧩 | Modular, independently-testable signal-processing architecture |
-| 🤖 | Machine-learning ready |
-| 🌍 | Fully open source |
-
-<br>
-
----
-
-## 📸 Platform Overview
-
-<div align="center">
-
-| Wearable — On Wrist | Wearable — Enclosure Open |
+| Dashboard — rest | Dashboard — tremor |
 |:---:|:---:|
-| <img src="docs/images/prototype_hand.jpg" width="380"> | <img src="docs/images/prototype_only.jpg" width="380"> |
+| <img src="docs/images/dashboard_normal.jpg" alt="Dashboard at rest" width="380"> | <img src="docs/images/dashboard_tremor.jpg" alt="Dashboard with tremor detected" width="380"> |
 
-| Dashboard — Resting State | Dashboard — Tremor Detected |
-|:---:|:---:|
-| <img src="docs/images/dashboard_normal.jpg" width="380"> | <img src="docs/images/dashboard_tremor.jpg" width="380"> |
+*(Dashboard photos from pipeline 2.x; the 3.0.0 card set is described in [dashboard & API](docs/software/DASHBOARD_AND_API.md).)*
 
-</div>
+## Validation status
 
-<br>
-
----
-
-## 🎯 Why ParkinSense?
-
-Parkinson's disease is traditionally assessed during short clinical visits, providing only brief snapshots of symptoms that fluctuate throughout the day.
-
-ParkinSense was built to explore a different approach: rather than isolating one channel, it continuously combines motion sensing, physiological sensing, activity tracking, and edge signal processing to generate objective digital biomarker estimates throughout everyday life.
-
-The platform is designed as a modular research ecosystem, so new sensors, algorithms, machine-learning models, and clinical studies can be integrated without redesigning the entire software stack. Its goal is not simply to detect tremor — it's to provide a flexible foundation for future research in wearable neurology.
-
-<br>
-
-## 🌐 Why Another Parkinson's Wearable?
-
-Most wearable projects targeting Parkinson's tremor stop at a single sensing channel — typically inertial tremor quantification, often processed offline after the recording session ends. ParkinSense integrates motion sensing, PPG (cardiac) sensing, activity tracking, BLE streaming, a live dashboard, a native Android companion app, a Python reference runtime, dataset generation, and ongoing research into one platform.
-
-Concretely, this means:
-
-- **Motion + Cardiac + Activity** biomarkers come from a single synchronized sensor stream, not three separate tools bolted together.
-- **Real-time, on-device processing** across all three pipelines, rather than an offline post-processing step.
-- **Cross-pipeline gating** — the same motion-context classification that flags tremor is reused to gate the step counter (rejecting tremor/handling artifacts) and to discount PPG confidence during movement, instead of each channel re-deriving its own notion of "is the body moving."
-- **Two access paths** — a Python reference stack for research and algorithm development, and a native Android app for standalone, Python-free deployment.
-- **A documented, replicable architecture** — filter orders, window lengths, state-machine transitions, and confidence heuristics are described in enough detail to be reproduced or extended.
-
-This is an architectural comparison — an integrated, multi-modal platform versus a single-channel tool — not a performance claim. ParkinSense has not yet undergone the kind of clinical validation that some single-modality tremor wearables have already completed, and every metric it reports is explicitly labeled research-grade pending that validation (see [Disclaimer](#️-disclaimer)).
-
-<br>
-
----
-
-## ✨ Core Features
-
-### 🧠 Motion Monitoring
-- Continuous 104 Hz IMU acquisition (LSM6DS3 accelerometer + gyroscope)
-- Binary BLE packet streaming
-- Multi-axis tremor detection with false-positive rejection
-- Motion-context classification (REST / LOW MOTION / ACTIVE)
-- Confidence estimation & tremor burden tracking
-
-### ❤️ Physiological Monitoring
-- MAX30102 optical sensor (IR + RED acquisition)
-- Finger-presence detection with hysteresis
-- Signal Quality Index (SQI) & sensor status classification (`NO_FINGER` / `LOW_SIGNAL` / `POOR_SIGNAL` / `GOOD` / `HIGH_SIGNAL` / `SATURATED`)
-- Adaptive peak detection and RR interval extraction
-- Heart rate estimation with EMA stabilization and confidence scoring
-- Heart rate variability — RMSSD, SDNN, Mean RR, pNN50
-- SpO₂ estimation (ratio-of-ratios with a signal-lock state machine)
-- Motion-aware heart rate confidence fusion
-
-*Upcoming: recovery score, sleep analytics.*
-
-### 👣 Activity Monitoring
-- Real-time step counting from accelerometer magnitude
-- High-pass filtering to remove gravity / slow drift
-- Adaptive, self-tuning detection threshold (rolling mean + k·σ)
-- Hysteresis-based peak detection (no double-counting per step)
-- Refractory-period gating against implausibly fast "steps"
-- Motion-state gated detection — tremor/handling can't register as steps
-- Multi-step walking confirmation before declaring "walking"
-- EMA-smoothed cadence (steps/min and Hz)
-- Distance estimation from configurable step length
-- Bout-based active-minute accounting
-- Per-step and walking-regularity confidence heuristics
-
-*Upcoming: activity-type classification (walk vs. run vs. climb), floors climbed, calorie estimation, VO₂ max.*
-
-### 💻 Software Platform
-- Modular V2 signal-processing pipeline (motion + PPG + activity)
-- Unified runtime combining all three pipelines
-- Live Plotly Dash dashboard with neurological, physiological, and activity panels
-- Native Android companion app with its own dashboard, recording, replay, and export
-- Two power-optimized firmware variants (v3 development / v4 power-optimized)
-- Offline dataset recorder, realtime CSV logging, JSON metrics export
-- Replay framework for algorithm validation
-- Research-oriented, ML-ready architecture
-
-<br>
-
----
-
-## 🌳 Development Branches
-
-| Branch | Purpose |
-|---|---|
-| **`main`** | Stable, validated release — V2 motion pipeline, stable BLE streaming, real-time dashboard, offline analytics |
-| **`feature/v2-signal-processing`** | Historical redesign branch that took the pipeline from FFT-only detection to the current modular filter → context → detector → confidence → state-machine architecture |
-| **`develop`** 🔧 *current* | Adds physiological sensing, activity tracking, the Android companion app, and v4 power-optimized firmware |
-
-**`develop` highlights:** MAX30102 integration · binary packet upgrade · IR/RED streaming · finger detection with hysteresis · SQI + sensor status · PPG pipeline (`ppg/ppg_processor.py`, `ppg/algorithms.py`) · heart rate, HRV, and SpO₂ estimation · step tracking pipeline (`StepCounter`) · cadence, distance, and active-minute accounting · unified runtime merging all three pipelines · updated dashboard · v4 firmware · native Android app.
-
-<br>
-
----
-
-## 🏗️ System Architecture
-
-ParkinSense follows a modular, end-to-end architecture where each component has a single responsibility — from embedded sensing to digital biomarker generation, every stage operates independently while integrating seamlessly with the rest of the platform.
-
-```mermaid
-flowchart LR
-
-subgraph Wearable
-A[LSM6DS3 IMU]
-B[MAX30102 PPG]
-C[nRF52840 Firmware]
-end
-
-A --> C
-B --> C
-C --> D[BLE 5.0]
-
-subgraph "Runtime V2"
-E[Packet Decoder]
-F[Motion Pipeline]
-G[PPG Pipeline]
-H[Step Counter Pipeline]
-I[Digital Biomarker Engine]
-end
-
-D --> E
-E --> F
-E --> G
-E --> H
-F --> I
-G --> I
-H --> I
-
-subgraph Applications
-J[Python Dashboard]
-K[Android Companion]
-L[CSV / JSON Export]
-end
-
-I --> J
-I --> K
-I --> L
-```
-
-The system consists of four major layers:
-
-- **Wearable Hardware** — acquires motion and physiological signals.
-- **Firmware & BLE Layer** — samples sensors and streams synchronized packets.
-- **Processing Layer** — extracts neurological, physiological, and activity biomarkers.
-- **Visualization Layer** — presents results through the Python and Android applications.
-
-<br>
-
-## 🧭 Design Principles
-
-- **Modular** — every subsystem has a clearly defined, single responsibility, independently testable.
-- **Real-Time** — all processing occurs continuously as sensor data arrives.
-- **Research-First** — algorithms are implemented for transparency, reproducibility, and experimentation rather than as opaque black boxes.
-- **Extensible** — additional sensors, pipelines, or ML models can be integrated without redesigning the existing architecture.
-- **Cross-Platform** — the same BLE protocol powers both the Python Runtime and the Android Companion App, ensuring algorithm parity.
-- **Runtime independent from the dashboard** — computation and visualization never share responsibility.
-
-<br>
-
----
-
-## 🔌 Hardware Platform
-
-<div align="center">
-<img src="docs/images/prototype_only.jpg" width="420">
-
-<em>Current wearable prototype — XIAO nRF52840 Sense in a 3D-printed enclosure</em>
-</div>
-
-<br>
-
-### Wearable Device
-
-| Component | Specification |
-|------------|----------------|
-| MCU | Seeed Studio XIAO nRF52840 Sense |
-| Processor | Nordic nRF52840 (64 MHz ARM Cortex-M4F) |
-| Motion Sensor | SparkFun LSM6DS3 6-axis IMU |
-| Physiological Sensor | MAX30102 optical PPG |
-| Connectivity | Bluetooth Low Energy 5.0 |
-| Battery | 3.7 V 700 mAh Li-ion (902035) |
-| Charging | USB-C |
-| Expansion | I²C |
-
-### Why These Components?
-
-Every hardware component was selected to balance power consumption, processing capability, and research flexibility rather than simply maximizing specifications.
-
-- **Nordic nRF52840** — provides BLE 5.0, floating-point DSP, ultra-low-power operation, and a mature SDK ecosystem, ideal for continuous wearable sensing.
-- **LSM6DS3 IMU** — 3-axis accelerometer + 3-axis gyroscope, used for tremor detection, motion context, walking detection, step counting, and cadence estimation. Sampled at **104 Hz**.
-- **MAX30102** — enables heart rate, RR intervals, HRV, SpO₂, finger detection, and signal-quality estimation. Sampled at **~50 Hz**.
-
-### Operating Configuration
-
-| Parameter | Value |
-|------------|--------|
-| Accelerometer / Gyroscope ODR | 104 Hz |
-| PPG (IR/RED) Sampling | ~50 Hz |
-| BLE Streaming | ~104 Hz |
-| BLE MTU | 247 Bytes |
-| Samples / Packet | 10 |
-| Packet Size | 248 Bytes |
-| Motion Analysis Window | 4 seconds |
-| PPG Analysis Window | 10 seconds (rolling) |
-| Step Detector Adaptive Window | ~2 seconds |
-| Dashboard Refresh | 100 ms |
-
-<br>
-
----
-
-## 🧩 Firmware
-
-The firmware is intentionally lightweight. Its only responsibility is reliable sensor acquisition and BLE communication — signal processing happens entirely in the Runtime Engine or Android application. This separation keeps the firmware deterministic while allowing algorithms to evolve independently.
-
-**Responsibilities:** sensor initialization · timestamp generation · IMU + optical sampling at their native rates · binary packet assembly · BLE transmission · sensor availability monitoring · power management.
-
-### Firmware Variants
-
-| | v3 Firmware | v4 Firmware |
+| Capability | Status | Evidence |
 |---|---|---|
-| Purpose | General development | Power-optimized wearable deployment |
-| Debugging | Maximum — serial logging, verbose output | Debug-gated, minimal overhead |
-| Recommended for | Development, debugging, algorithm testing | Continuous, all-day wearable operation |
-| Power behavior | Not power-optimized | Deep sleep, optimized BLE scheduling, reduced processing overhead |
+| BLE acquisition, recording, provenance | working | integration tests; hardware use with firmware v4 |
+| Deterministic replay through the live pipeline | working | `test_live_and_replay_are_identical` |
+| Rest-tremor detection / frequency / amplitude | working on synthetic ground truth | sensitivity 0.99, specificity 1.00, frequency error 0.024 Hz (synthetic) — **no patient data** |
+| Heart rate | working on synthetic ground truth | rest MAE 0.3–0.4 BPM (synthetic); no ECG comparison yet |
+| HRV | firmware 5.0.0 only (needs ≥ 25 Hz PPG) | RMSSD MAE 6.7 ms (synthetic) |
+| SpO₂ | **uncalibrated estimate** | no reference oximeter data |
+| Steps / cadence | working, known false steps during arm movement | −9.7 % walking error (synthetic); 69 vs ≈ 86 on one real recording |
+| Datasets with leakage-safe splits | working | unit tests |
+| Firmware 5.0.0 / protocol v2 | **written and host-tested, not yet flashed** | [hardware test procedure](docs/validation/HARDWARE_TEST_PROCEDURE.md) |
+| Mobile companion app | not in this repository | — |
 
-**v3** prioritizes visibility over efficiency — the right choice while implementing features, tuning algorithms, or validating new pipeline changes. **v4** builds directly on v3 and adds the power-optimization layer required for actual wearable deployment, while keeping the sensing architecture identical to preserve algorithm parity between development and deployment.
+Before/after numbers and how they were obtained: [validation results](docs/validation/RESULTS.md).
 
-**Location:** `firmware/xiao_nrf52840/`
+## Hardware
 
-<br>
+| Component | Part | Notes |
+|---|---|---|
+| MCU / radio | Seeed XIAO nRF52840 Sense (Cortex-M4F, BLE 5) | |
+| IMU | LSM6DS3, I²C 0x6A | firmware 5.0.0: ±4 g, ±500 dps, 104 Hz ODR |
+| PPG | MAX30102 (red + IR) | 100 SPS FIFO; ~100 Hz to host with v5, 10 Hz with v4 |
+| Power | 3.7 V 700 mAh Li-ion, USB-C charging | no power measurements exist yet |
 
-## 🔋 Battery Optimization
+Streaming is gated on a finger covering the PPG sensor (both firmware versions).
+Details: [hardware](docs/hardware/HARDWARE.md) · [firmware](docs/firmware/FIRMWARE.md) ·
+[BLE protocol](docs/protocol/BLE_PROTOCOL.md).
 
-Battery life is achieved through firmware design rather than simply increasing battery capacity.
-
-✔ **Deep Sleep** — when the MAX30102 detects loss of skin contact, the firmware stops sensing and processing and enters an ultra-low-power sleep state.
-
-✔ **Automatic Wake-up** — streaming resumes automatically when skin contact returns; no button required.
-
-✔ **Sensor-aware Power Management** — the PPG pipeline's finger-presence signal directly controls the wearable's power state, so power is only spent while the device is actually being worn.
-
-✔ **BLE Optimization** — packets are scheduled efficiently to minimize radio activity while maintaining continuous throughput.
-
-### Measured Performance
-
-Power was measured on the assembled wearable prototype using a **Nordic Power Profiler Kit II** — measured, not estimated from component datasheets.
-
-| Mode | Current |
-|------|----------|
-| Active Streaming (sensing + BLE) | ~7 mA |
-| Deep Sleep | Microamp range |
-
-**Battery:** 3.7 V, 700 mAh Li-ion · **Estimated runtime:** ~100 hours continuous, based on the measured ~7 mA active current.
-
-> Runtime estimate is calculated using the measured average active current and battery capacity. Actual runtime depends on operating conditions and BLE activity.
-
-<br>
-
----
-
-## 📡 BLE Protocol
-
-Each BLE notification contains one synchronized packet:
-
-```text
-┌─────────────────────────────────────┐
-│ Header                               │
-│   Version   (1B)                     │
-│   Flags     (1B)                     │
-│   Reserved  (2B)                     │
-│   Timestamp (4B)                     │
-├─────────────────────────────────────┤
-│ 10 × Samples                         │
-│   Acc X · Acc Y · Acc Z   (int16)    │
-│   Gyro X · Gyro Y · Gyro Z (int16)   │
-│   IR                       (uint32)  │
-│   RED                      (uint32)  │
-└─────────────────────────────────────┘
-```
-
-The versioned packet format allows future additions while maintaining backward compatibility between firmware and runtime. This synchronized structure ensures neurological, physiological, and activity pipelines operate on temporally aligned sensor data, simplifying sensor fusion and replay across both the Python Runtime and Android Companion App. Both the PPG pipeline and the step counter run off the same decoded accelerometer stream — no additional wire format changes were required to add step tracking.
-
-<br>
-
----
-
-## 🔬 Signal Processing Pipeline
-
-ParkinSense runs **three parallel processing pipelines** from the same BLE packet stream. Each stage has a single responsibility, so algorithms can be validated, replaced, or extended without affecting the rest of the system.
+## Architecture
 
 ```mermaid
 flowchart LR
-Packet["BLE Packet"] --> Motion["🧠 Motion Pipeline"]
-Packet --> PPG["❤️ PPG Pipeline"]
-Packet --> Activity["👣 Step Counter Pipeline"]
-Motion --> Fusion["Digital Biomarker Engine"]
-PPG --> Fusion
-Activity --> Fusion
-Fusion --> Dashboard["Python Dashboard"]
-Fusion --> Android["Android Companion"]
-Fusion --> Export["CSV / JSON Export"]
+  subgraph W["Wearable"]
+    IMU["LSM6DS3 104 Hz"] --> FW["firmware<br/>10 samples → 208 B"]
+    PPG["MAX30102"] --> FW
+  end
+  FW -- BLE --> E["RuntimeEngine<br/>decode · integrity"]
+  E --> T["tremor<br/>PSD → evidence → HMM"]
+  E --> H["PPG<br/>HR · HRV · SpO₂ est."]
+  E --> S["steps"]
+  T & H & S --> R[("capture.csv<br/>metadata.json")]
+  T & H & S --> API["/metrics → dashboard, app"]
+  R --> RP["replay"] --> E
+  R --> DS["datasets · analytics"]
 ```
 
-### 🧠 Motion Pipeline
+Two clocks: per sample (104 Hz) for buffering, PPG ingestion, steps and recording; per analysis
+(every 0.5 s over a 4 s window) for tremor and PPG analysis. All temporal logic runs on device
+signal time, which is why live and replayed results are identical.
+More: [architecture](docs/architecture/ARCHITECTURE.md) · [runtime](docs/runtime/RUNTIME_AND_RECORDING.md).
 
-Responsible for continuous neurological assessment using synchronized accelerometer and gyroscope data. Its objective is not simply to detect tremor, but to determine whether observed motion is consistent with Parkinsonian rest tremor while rejecting voluntary movement and environmental artifacts.
+## Key algorithms
 
-| Stage | Purpose |
-|---------|---------|
-| Rolling Buffer | 4-second analysis window for stable FFT resolution and lower false-positive rates |
-| Gravity Removal | A low-pass estimator subtracts the gravity component, separating orientation from motion |
-| Notch Filter | Digital 50 Hz filter rejects mains electrical interference |
-| Butterworth Band-pass | Isolates the Parkinsonian tremor band (4.0–6.5 Hz) |
-| Motion Context | Classifies each window as `REST` / `LOW MOTION` / `ACTIVE` |
-| Feature Extraction | RMS, dominant frequency, band ratio, spectral entropy/centroid, zero-crossing rate, frequency stability per axis |
-| Tremor Detector | Scores all three gyroscope axes simultaneously; tremor declared at a composite score ≥ 80/100 |
-| Confidence Estimator | Reduced when dominant frequency is unstable, tremor-band energy is weak, or wrist motion is excessive |
-| Temporal Validator | Requires 5 positive windows out of a rolling 10 before confirming tremor |
-| State Machine | Hysteresis-based states (`NO TREMOR → POSSIBLE → CONFIRMED → RECOVERY → NO TREMOR`) prevent rapid flip-flopping |
+| Area | Method | Doc |
+|---|---|---|
+| Tremor spectrum | Welch PSD per gyro axis (2 s Hann, 50 % overlap, nfft 1024), summed over axes | [motion & tremor](docs/algorithms/MOTION_AND_TREMOR.md) |
+| Frequency | 3.5–7.5 Hz peak, Gaussian (log-parabolic) interpolation | 〃 |
+| Amplitude | √(power within ±0.625 Hz) in deg/s RMS | 〃 |
+| Rejection | SNR vs spectral floor, band-edge check, arm-swing harmonic check | 〃 |
+| Motion context | 0.2–3 Hz linear acceleration + 0.5–3 Hz gyro RMS (tremor band excluded) | 〃 |
+| Temporal | 2-state HMM forward filter, rate-based transitions, overlap-tempered evidence | 〃 |
+| Heart rate | 0.5–4.5 Hz band-pass, peak detection with dicrotic-notch guard, median RR, EMA | [PPG](docs/algorithms/PPG.md) |
+| Motion artefact | confidence × motion multiplier; flag when HR ≈ motion frequency or 2× | 〃 |
+| HRV | RMSSD, SDNN, pNN50; withheld below 25 Hz effective PPG rate | 〃 |
+| Steps | adaptive-threshold peak detector with hysteresis, refractory and motion gate; tremor guard | [activity](docs/algorithms/ACTIVITY.md) |
+| Aggregates | tremor time %, tremor power (ParaDigMa definitions); robust personal baselines | [biomarkers](docs/biomarkers/BIOMARKERS.md) |
 
-**Biomarkers:** Tremor Score · Tremor Frequency · Tremor Severity · Tremor Burden · Motion State · Rest Index · Band Ratio · Axis Agreement/Dominance · Confidence
-
-### ❤️ PPG Pipeline
-
-Extracts cardiovascular biomarkers from optical PPG signals. Rather than estimating only heart rate, it continuously evaluates signal quality before generating any physiological metric.
-
-| Stage | Purpose |
-|---------|---------|
-| Rolling Buffer | ~10-second buffer per channel (IR/RED) |
-| Finger Detection | DC level, AC/DC ratio, saturation, and cardiac-frequency content, debounced with asymmetric ON/OFF hysteresis |
-| Signal Quality (SQI) | 0–100 score from spectral concentration, harmonic ratio, perfusion index, and pulse repeatability |
-| Sensor Status | Combines DC level, clipping, and SQI into `NO_FINGER` / `LOW_SIGNAL` / `POOR_SIGNAL` / `GOOD` / `HIGH_SIGNAL` / `SATURATED` |
-| Band-pass Filter | Zero-phase Butterworth isolates the cardiac band (0.5–4.5 Hz) |
-| Peak Detection | Rolling z-score normalization, local energy gating, adaptive prominence scaling, refractory period, and a physical pulse-width gate |
-| RR Extraction | Beat-to-beat intervals, filtered against physiological bounds and confidence-weighted outlier rejection |
-| Heart Rate | Confidence-weighted median of cleaned RR intervals, EMA-stabilized for display |
-| HRV | RMSSD, SDNN, Mean RR, pNN50 — standard time-domain definitions, each with its own confidence/artifact diagnostics |
-| SpO₂ | Beat-by-beat ratio-of-ratios with RED/IR peak alignment validation and a `SEARCHING → LOCKED → TRACKING → LOST` signal-lock state machine |
-| Motion-aware Confidence | HR confidence is discounted according to the Motion Pipeline's reported activity state |
-
-**Biomarkers:** Heart Rate · RR Intervals · RMSSD · SDNN · Mean RR · pNN50 · SpO₂ · Signal Quality Index · Sensor Status · HR Confidence
-
-> SpO₂ and HRV outputs are research-grade estimates, not clinically validated pulse-oximetry readings.
-
-### 👣 Step Tracking Pipeline
-
-A from-scratch accelerometer-based pedestrian step detector — not a repackaged third-party library — running off the same 104 Hz accelerometer stream as the Motion Pipeline, so no additional sensor acquisition is required.
-
-| Stage | Purpose |
-|---------|---------|
-| Acceleration Magnitude | Combines three axes (`√(ax²+ay²+az²)`) into one orientation-independent scalar |
-| High-Pass Filtering | First-order filter (α = 0.95) removes gravity and slow postural drift |
-| Adaptive Threshold | Self-tuning `mean + k·σ` (k = 0.7) over a rolling ~2-second buffer, clamped between a floor and ceiling |
-| Peak Detection & Hysteresis | Only the positive-going excursion triggers a step; re-arms only after the signal drops below a hysteresis band |
-| Refractory Period | Rejects any "step" faster than a configurable max cadence (200 steps/min default) |
-| Motion-State Gating | Steps only register while the Motion Pipeline reports genuine body movement — this is what prevents tremor or device handling from being miscounted |
-| Walking Confirmation | "Walking" flips `True` only after 3 consecutive gait-consistent steps |
-| Cadence Estimation | EMA-smoothed (α = 0.3) steps/min, also reported in Hz |
-| Distance Estimation | `step_count × step_length_m`, with step length as a configurable, per-user-calibratable parameter |
-| Active-Minute Accounting | A bout only accrues active minutes once sustained past a minimum duration *and* cadence threshold |
-| Confidence Heuristics | Step confidence from peak-margin ratio; walking confidence from step-interval coefficient of variation |
-
-**Biomarkers:** Step Count · Cadence (spm & Hz) · Distance · Walking State · Active Minutes · Step Confidence · Walking Confidence
-
-<br>
-
-## 🔗 Cross-Pipeline Fusion
-
-The three pipelines are not isolated — information generated by one subsystem is reused by the others:
-
-- Motion context reduces confidence in PPG estimates during heavy movement.
-- Walking state prevents tremor from being misclassified as voluntary motion.
-- Motion-state gating suppresses false step counts during involuntary tremor oscillation.
-- Shared timestamps keep all biomarkers temporally synchronized.
-
-This cross-pipeline architecture improves robustness without duplicating computation — each channel reuses the Motion Pipeline's "is the body moving" classification instead of re-deriving its own.
-
-<br>
-
----
-
-## 📊 Digital Biomarkers
-
-| Biomarker | Description |
-|-----------|-------------|
-| Tremor Score | Composite detector output |
-| Tremor Frequency | Dominant oscillation |
-| Tremor Severity | Severity category |
-| Tremor Burden | Long-term percentage |
-| Motion State | Activity context |
-| Rest Index | Wrist stillness metric |
-| Band Ratio | Tremor band energy |
-| Axis Agreement / Dominance | Cross-axis consistency & dominant tremor axis |
-| Confidence | Detector certainty |
-| Heart Rate | EMA-stabilized BPM estimate |
-| RR Intervals | Beat-to-beat interval series (ms) |
-| HRV (RMSSD, SDNN) | Short-term heart rate variability |
-| Mean RR / pNN50 | Additional HRV time-domain metrics |
-| SpO₂ | Blood oxygen saturation estimate |
-| Signal Quality (SQI) | 0–100 PPG signal trust score |
-| Sensor Status | NO_FINGER / LOW / POOR / GOOD / HIGH / SATURATED |
-| HR Confidence | Composite, motion-aware trust score |
-| Step Count | Cumulative detected steps |
-| Cadence | EMA-smoothed steps/min (and Hz) |
-| Distance | Estimated distance from step length |
-| Walking State | Confirmed walking flag |
-| Active Minutes | Sustained, cadence-qualified activity time |
-| Step / Walking Confidence | Peak-margin and step-interval-regularity heuristics (0–1) |
-
-*Planned:* Recovery Score · Sleep Quality · Bradykinesia Index · Dyskinesia Index · Medication Response · Activity Type Classification · Longitudinal Symptom Burden
-
-<br>
-
----
-
-## 📺 Dashboard
-
-<div align="center">
-
-| Resting State | Tremor Detected |
-|:---:|:---:|
-| <img src="docs/images/dashboard_normal.jpg" width="420"> | <img src="docs/images/dashboard_tremor.jpg" width="420"> |
-
-</div>
-
-<br>
-
-The dashboard (`realtime_dashboard_v2.py`) is a dark-themed Plotly Dash app that polls `realtime_metrics_v2.json` and `realtime_capture_v2.csv` on a 100 ms tick and re-renders in place.
-
-**Layout** — metric cards are grouped into three labeled sections:
-
-- **Parkinson's** — Status, Tremor Score, Frequency, Severity, Burden, Confidence, Motion, Rest Index, Best Axis, Band Ratio
-- **Activity** — Steps, Cadence, Distance, Walking, Active Minutes
-- **Vitals** — Heart Rate, SpO₂, Finger
-
-Boolean/state values (`TREMOR` / `NO TREMOR`, `YES` / `NO`, `WAITING`) are color-coded — green for a clear/positive state, red for a flagged one, grey while waiting for data.
-
-Below the cards sit four live graphs: **Live Gyroscope** (GX/GY/GZ), a **Tremor Score Gauge** (0–100 with green/yellow/orange/red zones), a **Heart Rate & SpO₂** dual-axis trend, and a **Cadence Trend** area chart. The three trend graphs show a rolling **60-second** window computed from the on-device timestamp, so "last 60 seconds" means the same span regardless of streaming rate.
-
-**Architecture note:** the dashboard is intentionally decoupled from the processing pipelines. All computation happens inside Runtime V2; the dashboard only reads the exported JSON/CSV files and never imports the pipeline modules directly — so pipelines can be tested, replayed, or replaced without touching the UI.
-
-**Not yet on the dashboard:** HRV (RMSSD/SDNN/Mean RR/pNN50), Signal Quality, Sensor Status, and raw IR/RED are already logged to CSV/JSON but don't yet have a card or graph.
-
-*Coming soon:* Recovery · Sleep Analytics · Battery Status · Activity Type · HRV/SQI/Sensor Status visualization.
-
-<br>
-
----
-
-## 📱 Android Companion Application
-
-The Android application brings the Python runtime experience directly to a mobile device — not a simple BLE terminal, but a complete wearable companion, entirely on-device: BLE communication, real-time decoding, signal processing (all three pipelines), dashboard visualization, session recording, storage, export, history, and replay — without requiring Python.
-
-### Core Features
-
-| Feature | Description |
-|---|---|
-| BLE Device Discovery | Scans for and lists nearby ParkinSense wearables |
-| Auto Reconnect | Automatically restores a dropped BLE connection |
-| MTU Negotiation | Negotiates BLE MTU for full-rate packet streaming |
-| Real-time Processing | Runs the motion, PPG, and step pipelines live, on-device |
-| Dashboard | Live cards and charts across neurological, physiological, and activity data |
-| Recording Sessions | Captures a full session with metadata |
-| Session History | Browsable list of past recordings |
-| CSV / JSON Export | Export a session in either format |
-| Replay | Re-plays a recorded session through the live rendering path |
-| Diagnostics | Developer-facing BLE and pipeline diagnostics |
-| Dark Mode | Full dark theme |
-
-### Architecture
-
-The Android app's internal architecture mirrors the Python Runtime V2 architecture: **BLE Manager → Packet Decoder → Pipeline Dispatcher (Motion / PPG / Step) → Database → Dashboard / Export Manager.**
-
-### Session Recording, History & Replay
-
-Every recording captures start/end time, duration, firmware version, device name, average HR/SpO₂, steps, cadence, distance, tremor and motion metrics, and notes. Sessions can be opened, reviewed, exported, deleted, shared, or replayed exactly as if streaming live — useful for algorithm validation, clinical review, debugging, and education without needing the wearable connected.
-
-### Export
-
-Filters: Current Session · Today · Yesterday · Last 7/30 Days · This Month · Custom Date(s) · All Sessions. **Formats:** CSV · JSON · ZIP.
-
-### Diagnostics
-
-Surfaces RSSI, MTU, packets/sec, samples/sec, packet loss, decoder rate, pipeline status, buffer status, reconnect count, and BLE state.
-
-### Future Features
-
-Cloud Sync · OTA Firmware Updates · Battery Health · Recovery & Sleep · Medication Tracking · Clinician Portal · Longitudinal Analytics
-
-<br>
-
----
-
-## 📁 Repository Structure
+## Repository structure
 
 ```text
-ParkinSense/
-│
-├── firmware/
-│   └── xiao_nrf52840/
-│       └── src/
-│           ├── parksense_wearable_v3/   # Development firmware
-│           └── parksense_wearable_v4/   # Power-optimized wearable firmware
-│
-├── Android/
-│   └── app/
-│       ├── ble/                          # BLE Manager, discovery, auto-reconnect
-│       ├── decoder/                      # Packet Decoder
-│       ├── pipeline/                     # Motion / PPG / Step pipelines
-│       ├── database/                     # Session storage & history
-│       ├── dashboard/                    # Live dashboard UI
-│       ├── export/                       # CSV / JSON / ZIP export
-│       └── diagnostics/                  # BLE + pipeline diagnostics
-│
-├── dashboard/
-│   └── python/
-│       ├── activity/          # step_counter.py
-│       ├── ppg/                # ppg_processor.py, algorithms.py
-│       ├── pipeline/ pipelines/ # Motion pipeline & unified runtime orchestration
-│       ├── filters/            # Gravity removal, notch, band-pass
-│       ├── detector/ detectors/ # Tremor detection & state machine
-│       ├── features/           # Per-axis feature extraction
-│       ├── context/             # Motion-context classification
-│       ├── fusion/             # Motion-aware confidence fusion
-│       ├── runtime/            # Runtime V2 — packet decoding & orchestration
-│       ├── realtime/            # Realtime CSV/JSON logging
-│       ├── replay/              # Offline replay framework
-│       ├── dataset/             # Dataset generation utilities
-│       ├── calibration/         # Calibration routines
-│       ├── inference/ models/   # Reserved for future ML models
-│       ├── dashboard/           # realtime_dashboard_v2.py
-│       ├── config.py
-│       └── record_imu.py
-│
-├── docs/                # Documentation & images
-├── hardware/            # Hardware design files
-├── research/            # Research notes & the IEEE paper
-└── README.md
+parkinsense/            Python package
+  protocol/             BLE packet decode/encode (v1, v2), unwrap, loss/gap tracking
+  motion/  tremor/      filters, spectral features, motion context, tremor evidence, HMM
+  ppg/                  PPG processor (state, quality) and algorithms (DSP)
+  activity/             step counter (default) + experimental periodic counter
+  runtime/              engine (pure), recorder (files), app (BLE + FastAPI)
+  replay/  datasets/    deterministic replay; dataset builder; leakage-safe splits
+  analytics/            session biomarkers; personal baselines
+  synthetic/            ground-truth signal generators
+  visualization/        Dash dashboard
+firmware/
+  parkinsense_wearable/ firmware 5.0.0, protocol v2 (not yet hardware-verified)
+  legacy/               ble_stream_v4 (protocol v1, hardware-verified) and older sketches
+  tests/                host tests for packet logic; API stubs
+tests/                  unit · integration · regression (golden) · synthetic · hardware
+benchmarks/             baseline-vs-current harness and committed results
+data/reference/         real recordings used by the regression tests
+docs/                   documentation (index: docs/README.md)
 ```
 
-<br>
-
----
-
-## 🚀 Getting Started
-
-This guide walks through setting up the complete platform, from flashing the wearable firmware to visualizing live neurological, physiological, and activity biomarkers.
-
-### Requirements
-
-**Hardware**
-
-| Component | Purpose |
-|------------|----------|
-| Seeed Studio XIAO nRF52840 Sense | Main wearable MCU |
-| SparkFun LSM6DS3 | 6-axis IMU |
-| MAX30102 | Optical PPG sensor |
-| 3.7 V 700 mAh Li-ion Battery (902035) | Portable power supply |
-| USB-C Cable | Programming and charging |
-| BLE-enabled Computer or Android Device | Runtime and dashboard |
-
-**Software:** Python 3.11+ · Arduino IDE 2.x · Git · Android Studio (for the companion app)
+## Installation
 
 ```bash
-pip install numpy scipy pandas matplotlib plotly dash bleak pyqtgraph
+git clone https://github.com/sudo-pranshu/ParkinSense.git && cd ParkinSense
+git checkout transform/engineering-overhaul
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[live,dashboard,dev]"
 ```
 
-### Clone & Select Branch
+Firmware: Arduino IDE 2.x with the Seeed nRF52 (Bluefruit-based) core, *Seeed Arduino LSM6DS3*
+and *SparkFun MAX3010x* libraries. Use `firmware/legacy/ble_stream_v4` for data collection until
+`firmware/parkinsense_wearable` passes hardware tests H0–H6.
+Full guide: [installation](docs/getting-started/INSTALLATION.md).
+
+## Quick start
 
 ```bash
-git clone https://github.com/sudo-pranshu/ParkinSense.git
-cd ParkinSense
-git checkout develop
-git branch
-# * develop
+parkinsense-live                                     # scan, connect, record to recordings/, serve :8000/metrics
+python -m parkinsense.visualization.dashboard        # http://127.0.0.1:8050
+
+parkinsense-replay recordings/<session>/capture.csv --out replays/a
+parkinsense-replay data/reference/ble_v1_104hz/parkinsense_20260630_123551.csv   # no hardware needed
+parkinsense-dataset recordings/*/capture.csv --out datasets/v1 --version 1.0.0
 ```
 
-### Flash the Firmware
+Each session directory holds `capture.csv` (79 columns, every raw sample plus window outputs
+marked by `is_analysis_row`) and `metadata.json` (versions, configuration, measured sample rate,
+packet loss, wraps, gaps, errors).
 
-Open Arduino IDE and navigate to the development firmware for day-to-day iteration:
-
-```text
-firmware/xiao_nrf52840/src/parksense_wearable_v3/
-```
-
-Or the power-optimized build for actual wearable deployment:
-
-```text
-firmware/xiao_nrf52840/src/parksense_wearable_v4/
-```
-
-Install required libraries: Adafruit Bluefruit nRF52 · Adafruit TinyUSB · SparkFun LSM6DS3 · SparkFun MAX3010x · Wire.
-
-Select **Board → Seeed XIAO nRF52840 Sense**, choose the correct serial port, then click **Upload**.
-
-Expected serial output:
-
-```text
-ParkinSense Initializing...
-Initializing IMU...
-✓ IMU Ready
-Initializing MAX30102...
-✓ MAX30102 Ready
-Battery Connected
-BLE Advertising...
-Waiting for Connection...
-```
-
-### Run the Runtime & Launch the Dashboard
+## Testing
 
 ```bash
-python -m dashboard.python.runtime.runtime_v2
+pytest                                                           # 64 passed, 1 deselected (hardware)
+python -m benchmarks.run_benchmarks --impl current --out benchmarks/results/current.json
 ```
 
-```text
-Searching for ParkinSense...
-Connected
-Streaming...
-========== PARKINSENSE V2 ==========
-```
+Unit, integration (incl. live == replay), golden regression on real recordings, synthetic
+performance floors and firmware host tests run in CI. Guide: [testing](docs/testing/TESTING.md).
 
-The runtime automatically generates `realtime_capture_v2.csv` and `realtime_metrics_v2.json`.
+## Documentation
 
-```bash
-python dashboard/python/dashboard/realtime_dashboard_v2.py
-```
+**[Documentation index](docs/README.md)** — installation · architecture · hardware · firmware ·
+BLE protocol · Python packages · runtime & capture schema · dashboard & API · replay & datasets ·
+algorithms with equations · biomarkers · testing · hardware validation · contributing ·
+decision records · references · reports.
 
-Open **http://127.0.0.1:8050** — the dashboard updates continuously while the wearable is streaming.
+## Limitations
 
-### Use the Android App
+* All accuracy figures come from synthetic signals or a few unlabelled recordings; tremor
+  detection has never been evaluated on people with Parkinson's disease.
+* Physiological and pathological tremor cannot be separated from frequency and amplitude alone.
+* Tremor confirmation takes ~6 s from onset (deliberate, to suppress false alarms).
+* Heart rate during rhythmic movement is often wrong — flagged `MOTION_ARTIFACT`, not corrected.
+* Purposeful arm movement produces false steps.
+* Firmware ≤ v4: PPG effectively 10 Hz (no HRV), gyro wraps above 250 dps.
+* Streaming requires a finger on the PPG sensor, which rules out tremor-only and overnight use.
+* No power measurements exist for any firmware.
+* `STEP_COUNTER_VERSION` in recordings reads `2.0` although the default counter is v1.1
+  (known provenance bug, see [audit](docs/audit/DOCUMENTATION_AUDIT_REPORT.md)).
 
-1. Build and install the app from `Android/` in Android Studio (Android 10+).
-2. Open the app and scan for nearby ParkinSense wearables.
-3. Connect — the app negotiates MTU and starts streaming automatically.
-4. View live neurological, physiological, and activity data on the dashboard.
-5. Start a recording to capture a full session.
-6. Review, export, or replay sessions from Session History.
+## Contributing
 
-### Sample Runtime Output
+Read [contributing](docs/development/CONTRIBUTING.md): signal time only, no I/O in processing,
+quality states for new outputs, append-only schema, versioned protocol, benchmark before replacing
+an algorithm, and an ADR for every interpretation-changing decision.
 
-```text
-========== PARKINSENSE V2 ==========
+## Research references
 
-Motion
-State          : NO TREMOR
-Score          : 14 / 100
-Confidence     : 96 %
-Frequency      : 5.18 Hz
-Severity       : NONE
-Motion         : REST
-Best Axis      : GY
--------------------------------------
+Method sources (ParaDigMa, Welch, Gaussian peak interpolation, HMM filtering, TROIKA, HRV Task
+Force, Verisense) and evaluated open-source projects with verified licences:
+[references](docs/research/REFERENCES.md). The original paper is in
+[`docs/research/`](docs/research/ParkinSense_paper.pdf).
 
-Activity
-Steps          : 482
-Cadence        : 108.4 spm
-Distance       : 361.5 m
-Walking        : NO
-Active Minutes : 6.2
--------------------------------------
-
-Vitals
-Heart Rate     : 71.4 BPM
-SpO2           : 97.8 %
-Signal Quality : 68.2
-Finger         : YES
-Sensor Status  : GOOD
-
-RMSSD          : 24.3 ms
-SDNN           : 31.6 ms
-Mean RR        : 840.0 ms
-pNN50          : 12.5 %
-=====================================
-```
-
-### Troubleshooting
-
-| Problem | Solution |
-|----------|----------|
-| Device not found | Ensure BLE is enabled and firmware is running |
-| Dashboard not updating | Verify `runtime_v2.py` is running |
-| No IMU data | Check LSM6DS3 wiring |
-| No PPG values | Verify MAX30102 SDA/SCL connections |
-| Finger always NO | Place finger completely over sensor |
-| Heart Rate stuck near None | Hold still for the full 10 s buffer to fill; check Signal Quality/Sensor Status |
-| HRV always None | Needs several consecutive clean RR intervals — improve finger contact/stillness |
-| Steps not incrementing | Confirm Motion Pipeline is reporting `active`/`walking`/`moving`, not `REST` |
-| Walking never turns YES | Requires 3 consecutive steps at a consistent gait interval |
-| Active Minutes stuck at 0 | Bout must sustain past the minimum duration and cadence threshold |
-| Android app can't find device | Check Bluetooth/Location permissions and confirm firmware is advertising |
-| Android app keeps disconnecting | Check the Diagnostics page for RSSI, reconnect count, and BLE state |
-
-<br>
-
----
-
-## ⚡ Performance
-
-| Metric | Value |
-|----------|---------|
-| IMU Sampling | 104 Hz |
-| PPG Sampling | ~50 Hz |
-| BLE Streaming | ~104 Hz |
-| Motion Analysis Window | 4 s |
-| PPG Analysis Window | 10 s (rolling) |
-| Step Detector Adaptive Window | ~2 s (rolling) |
-| SpO₂ Publish Cadence | ~10 s (throttled) |
-| Packet Size | 248 Bytes |
-| Runtime Latency | <100 ms after analysis window |
-| Dashboard Refresh | 100 ms |
-| Active Current (v4, measured) | ~7 mA |
-| Deep Sleep Current (v4, measured) | Microamp range |
-| Estimated Battery Life (v4) | ~100 hours continuous |
-
-### Validation Strategy
-
-- **Hardware:** IMU/PPG communication · battery operation · BLE stability · continuous sampling
-- **Firmware:** timestamp synchronization · packet integrity · sensor sync · long-duration streaming · power management
-- **BLE:** connection stability · packet sequencing · automatic reconnection · MTU negotiation · data integrity
-- **Algorithm:** evaluated against stationary, walking, simulated-tremor, normal-voluntary-motion, and long-duration streaming datasets, allowing new algorithms to be compared against consistent reference recordings
-
-<br>
-
----
-
-## 🗺️ Development Roadmap
-
-**Phase 1 — Hardware**
-- [x] LSM6DS3 Integration
-- [x] MAX30102 Integration
-- [x] BLE Streaming
-- [x] Battery-powered Operation
-
-**Phase 2 — Signal Processing**
-- [x] Gravity Removal
-- [x] Notch Filter
-- [x] Butterworth Band-pass
-- [x] Motion Context
-- [x] Feature Extraction
-- [x] Multi-axis Detector
-- [x] Confidence Estimation
-- [x] Temporal Validation
-- [x] State Machine
-
-**Phase 3 — Physiological Monitoring**
-- [x] IR Acquisition
-- [x] RED Acquisition
-- [x] Finger Detection
-- [x] Signal Quality Estimation
-- [x] Sensor Status Classification
-- [x] Heart Rate
-- [x] RR Interval Extraction
-- [x] HRV (RMSSD, SDNN, Mean RR, pNN50)
-- [x] SpO₂ Estimation
-- [x] Motion-aware HR Confidence
-
-**Phase 4 — Activity Monitoring**
-- [x] Step Counter
-- [x] Cadence Estimation
-- [x] Distance Estimation
-- [x] Walking Detection
-- [x] Active Minute Accounting
-- [ ] Activity Type Classification
-- [ ] Floors Climbed
-- [ ] Calorie Estimation
-- [ ] VO₂ Max
-
-**Phase 5 — Digital Biomarkers**
-- [x] Tremor Frequency
-- [x] Tremor Score
-- [x] Confidence
-- [x] Motion Context
-- [x] Tremor Burden
-- [x] Rest Index
-- [x] Heart Rate / HRV / SpO₂ Biomarkers
-- [x] Step / Cadence / Distance / Active Minute Biomarkers
-
-**Phase 6 — Wearable Platform**
-- [x] Rechargeable Li-ion Operation
-- [x] Live Dashboard
-- [x] Runtime V2 (Unified Motion + PPG + Activity)
-- [x] BLE Packet Versioning
-- [x] Realtime CSV Logging
-- [x] JSON Metrics Export
-- [x] Power Optimization (v4 Firmware)
-- [x] Mobile Companion App (Android)
-- [ ] Battery Level Monitoring
-- [ ] Cloud Sync
-- [ ] OTA Firmware Updates
-
-**Phase 7 — Machine Learning**
-- [ ] Adaptive Thresholds
-- [ ] Personalized Models
-- [ ] Activity Recognition
-- [ ] Bradykinesia Detection
-- [ ] Dyskinesia Detection
-- [ ] Long-term Progression Analysis
-
-<br>
-
----
-
-## 🔍 Research Focus
-
-Parkinsonian rest tremor · Digital biomarkers · Wearable neurological monitoring · Continuous disease tracking · Motion artifact rejection · Physiological signal fusion · Human activity recognition · Biomedical signal processing · Edge AI for wearables · Sensor fusion · Wearable computing · Embedded systems · Biomedical AI
-
-**Applications:** Parkinson's Disease Monitoring Research · Continuous Tremor Assessment · Digital Biomarker Research · Human Activity Recognition · Wearable AI · Biomedical Signal Processing · Embedded Health Monitoring · Edge Computing · Remote Patient Monitoring
-
-<br>
-
----
-
-## ⚠️ Current Limitations
-
-Transparency is essential for reproducible research.
-
-- The system is a research prototype and is **not a medical device**.
-- Algorithms are intended for research and engineering evaluation.
-- Clinical validation has not yet been performed, nor has evaluation on large patient cohorts.
-- Physiological estimates are influenced by motion artifacts and sensor placement.
-- Digital biomarkers generated by the platform should not be interpreted as clinical diagnoses.
-
-These limitations define future research directions rather than shortcomings of the platform.
-
-<br>
-
-## 🚀 Future Vision
-
-ParkinSense is not intended to be a single wearable prototype. The long-term vision is to evolve it into a modular open research platform capable of supporting neurological, physiological, and behavioral sensing through a unified wearable architecture. Future versions may integrate additional sensors, machine-learning models, cloud synchronization, longitudinal analytics, and clinician-facing dashboards while maintaining compatibility with the existing firmware and BLE protocol.
-
-**Planned research:** Bradykinesia · Dyskinesia · Freezing of Gait · Respiratory Rate · Stress Estimation · Recovery Analysis · Sleep Monitoring · Edge Machine Learning · Personalized Models · Adaptive Thresholds · Digital Phenotyping · Longitudinal Biomarkers
-
-**Planned platform features:** Battery-level monitoring · Cloud synchronization · OTA firmware updates · Digital therapeutics · Clinician portal · Medication tracking
-
-<br>
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome, whether you're interested in embedded systems, wearable computing, biomedical signal processing, Android development, or machine learning:
-
-- New signal-processing algorithms
-- Motion classification
-- HRV improvements
-- BLE optimization
-- Android features
-- Dashboard enhancements
-- Documentation, bug fixes, performance optimization
-
-Before submitting major changes, please open an issue to discuss the proposed design.
-
-<br>
-
-## 📖 Citation
-
-If you use ParkinSense in academic research, educational projects, or publications, please cite the repository:
+## Citation
 
 ```bibtex
 @misc{parkinsense2026,
   author       = {Pranshu Kumar},
-  title        = {ParkinSense: Continuous Neurological Monitoring and Digital Biomarker Platform},
+  title        = {ParkinSense: Open Research Platform for Wrist-Worn Movement and PPG Monitoring},
   year         = {2026},
-  howpublished = {\url{https://github.com/sudo-pranshu/ParkinSense}},
-  note         = {Open-source wearable neurological monitoring platform}
+  howpublished = {\url{https://github.com/sudo-pranshu/ParkinSense}}
 }
 ```
 
-<br>
+## License
 
-## 📜 License
+MIT — see [LICENSE](LICENSE).
 
-This project is released under the MIT License. See the `LICENSE` file for details.
+## Disclaimer
 
-<br>
-
-## ⚠️ Disclaimer
-
-ParkinSense is an open-source research platform intended for educational and experimental purposes.
-
-It is **not** a certified medical device and must not be used for diagnosis, treatment, or clinical decision-making. All outputs — including tremor detection, confidence scores, physiological metrics, activity metrics, and digital biomarkers — are intended solely for research and development.
-
-Clinical validation with appropriately labeled datasets is required before any medical application.
-
----
-
-<div align="center">
-
-### ParkinSense
-**Continuous Neurological Monitoring & Digital Biomarker Platform**
-
-Developed by **Pranshu Kumar**
-
-*Wearable Computing • Biomedical Signal Processing • Digital Health • Parkinson's Disease Research*
-
-</div>
+ParkinSense is a research and education platform. It is not a medical device and must not be used
+for diagnosis, treatment or clinical decisions.
