@@ -70,21 +70,45 @@ The orientation-independent spectrum is the axis sum $S(f)=\sum_a P_a(f)$ (as in
 The gyroscope is **not band-passed** before this step. v2 band-passed it to 3–8 Hz first,
 which made the band ratio $\approx 1$ for almost any input (ADR-0005).
 
-## 3. Tremor peak frequency
+### 3. Tremor peak frequency
 
-Search band $\mathcal{B}_T = [3.5, 7.5]$ Hz (`config.TREMOR_BAND_HZ`; PD rest tremor is typically
-4–6 Hz). Peak bin $i^* = \arg\max_{f_i\in\mathcal{B}_T} S(f_i)$, refined by Gaussian
-(log-parabolic) interpolation:
+Search band \(\mathcal{B}_T = [3.5, 7.5]\) Hz (`config.TREMOR_BAND_HZ`; PD rest tremor is typically 4–6 Hz).
 
-$$\alpha=\ln S_{i^*-1},\;\beta=\ln S_{i^*},\;\gamma=\ln S_{i^*+1},\qquad
-\delta = \tfrac12\,\frac{\alpha-\gamma}{\alpha-2\beta+\gamma}\in[-\tfrac12,\tfrac12],\qquad
-\hat f = f_{i^*} + \delta\,\Delta f$$
+The peak bin is:
 
-If the curvature $\alpha-2\beta+\gamma \ge 0$ (no local maximum) or the peak is at the array edge,
-$\hat f = f_{i^*}$. For a Hann window this reduces peak-location bias to a small fraction of a
-bin (Jacobsen & Kootsookos 2007; Gasior & Gonzalez 2004).
-Measured: |error| < 0.06 Hz for clean sinusoids at 3.9–6.9 Hz (`test_frequency_interpolation_accuracy`);
-median 0.024 Hz on the synthetic suite vs 0.090 Hz for v2.
+\[
+i^{*} = \underset{f_i \in \mathcal{B}_T}{\operatorname{argmax}} \ S(f_i)
+\]
+
+The peak is refined using Gaussian (log-parabolic) interpolation:
+
+\[
+\alpha = \ln S_{i^{*}-1}, \qquad
+\beta = \ln S_{i^{*}}, \qquad
+\gamma = \ln S_{i^{*}+1}
+\]
+
+\[
+\delta =
+\frac{1}{2}
+\frac{\alpha-\gamma}
+{\alpha-2\beta+\gamma}
+\in \left[-\frac{1}{2},\frac{1}{2}\right]
+\]
+
+\[
+\hat{f} = f_{i^{*}} + \delta \,\Delta f
+\]
+
+If the curvature \(\alpha - 2\beta + \gamma \geq 0\) (no local maximum), or the peak is at the array edge, use the unrefined peak frequency:
+
+\[
+\hat{f} = f_{i^{*}}
+\]
+
+For a Hann window this reduces peak-location bias to a small fraction of a bin (Jacobsen & Kootsookos 2007; Gasior & Gonzalez 2004).
+
+Measured: \(|\text{error}| < 0.06\) Hz for clean sinusoids at 3.9–6.9 Hz (`test_frequency_interpolation_accuracy`); median 0.024 Hz on the synthetic suite versus 0.090 Hz for v2.
 
 ## 4. Tremor power, amplitude, SNR
 
