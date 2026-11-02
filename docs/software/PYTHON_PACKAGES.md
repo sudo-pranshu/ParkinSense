@@ -22,7 +22,7 @@ flowchart BT
   replay["replay"]
   datasets["datasets<br/>builder · splits"]
   analytics["analytics<br/>biomarkers · baseline"]
-  viz["visualization.dashboard"]
+  viz["visualization<br/>dashboard · pages"]
   synthetic["synthetic.signals"]
   motion --> config
   tremor --> config
@@ -39,11 +39,15 @@ flowchart BT
   replay --> protocol
   datasets --> replay
   analytics --> config
+  viz --> analytics
+  viz --> motion
 ```
 
 (`motion.pipeline` imports `tremor.detector`/`tremor.temporal`, and `tremor.detector` imports
 the `SpectralFeatures` type from `motion.features`; there is no import cycle at module level.)
-`visualization.dashboard` imports nothing from the package — it reads files only.
+`visualization` never imports the runtime engine or the detectors: it reads the runtime's HTTP
+API and recorded files, uses `analytics` for session summaries and `motion.features.gyro_spectrum`
+only to show the spectrum of an already-recorded window.
 
 ---
 
@@ -146,4 +150,13 @@ Model details: [testing](../testing/TESTING.md#synthetic-ground-truth).
 
 ## `visualization`
 
-`dashboard`: Dash app; reads files only. [Dashboard and API](DASHBOARD_AND_API.md).
+| Module | Role |
+|---|---|
+| `dashboard` | Dash app, sidebar routing, CLI (`--host`, `--port`, `--api`) |
+| `datasource` | `LiveFeed`: background poll of `/live`, bounded buffers, stale/offline detection, metrics-file fallback |
+| `sessions` | session discovery (`recordings/`, `replays/`), cached analysis-row loading, indexed raw-window access, episodes, quality fractions |
+| `jobs` | replay and dataset generation as subprocess jobs (CLI), log capture |
+| `charts`, `components`, `quality`, `theme` | figure builders (template, decimation, quality scatter, shading, state strips), cards and badges, quality-state presentation, colours |
+| `pages/` | one module per page: `layout()`, figure/summary functions, `register(app)` |
+
+[Dashboard and API](DASHBOARD_AND_API.md).

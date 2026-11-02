@@ -29,6 +29,9 @@ parkinsense-dataset = "parkinsense.datasets.builder:main"
 [tool.setuptools.packages.find]
 include = ["parkinsense*"]
 
+[tool.setuptools.package-data]
+"parkinsense.visualization" = ["assets/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["hardware: requires a physical ParkinSense device (skipped in CI)"]

@@ -8,7 +8,8 @@ Every page states what is validated and what is not.
 
 | | |
 |---|---|
-| [Installation & quick start](getting-started/INSTALLATION.md) | install, flash, record, dashboard, no-hardware demo, troubleshooting |
+| [Installation & quick start](getting-started/INSTALLATION.md) | install, flash, record, dashboard, no-hardware demo |
+| [Troubleshooting](getting-started/TROUBLESHOOTING.md) | launch scripts, ports, environment, BLE, signal quality, dashboard states |
 | [Architecture](architecture/ARCHITECTURE.md) | layers, data flow, module map, design principles |
 | [Validation results](validation/RESULTS.md) | baseline vs current numbers and what they do (not) mean |
 
@@ -21,7 +22,7 @@ Every page states what is validated and what is not.
 | Protocol | [BLE protocol](protocol/BLE_PROTOCOL.md) — byte layout, flags, example bytes, decoding, rollover, loss |
 | Python | [Package reference](software/PYTHON_PACKAGES.md) — every package's API, inputs/outputs, tests |
 | Runtime | [Runtime & recording](runtime/RUNTIME_AND_RECORDING.md) — engine, time model, integrity, quality states, 79-column schema, metadata |
-| Dashboard / API | [Dashboard & API](software/DASHBOARD_AND_API.md) |
+| Dashboard / API | [Dashboard & API](software/DASHBOARD_AND_API.md) — architecture, pages, quality semantics, live API, launch scripts, configuration |
 | Replay & datasets | [Replay, datasets & methodology](datasets/REPLAY_AND_DATASETS.md) — replay, QC, windows, labels, leakage-safe splits, provenance |
 
 ## Algorithms (with equations)
@@ -48,6 +49,7 @@ Every page states what is validated and what is not.
 | | |
 |---|---|
 | [Transformation report](audit/TRANSFORMATION_REPORT.md) | what changed in 3.0.0, finding by finding |
+| [Dashboard 2.0 report](audit/DASHBOARD_2_REPORT.md) | dashboard and launcher overhaul, before/after measurements |
 | [Documentation gap analysis](audit/DOCUMENTATION_GAP_ANALYSIS.md) | develop vs this branch |
 | [Documentation audit report](audit/DOCUMENTATION_AUDIT_REPORT.md) | how these documents were verified |
 | [Engineering audit (original)](audit/ParkinSense_Engineering_Audit.html), [runtime review](audit/RUNTIME_ARCHITECTURE_REVIEW.md) | pre-3.0.0 findings |

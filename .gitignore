@@ -30,3 +30,5 @@ datasets/*/
 .claude_transfer/
 *.egg-info/
 .pytest_cache/
+.run/
+logs/

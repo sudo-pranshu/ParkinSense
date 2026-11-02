@@ -50,11 +50,12 @@ to a Python runtime. The runtime:
 * records every raw sample, so any session can be **replayed bit-exactly** through any pipeline
   version.
 
-| Dashboard — rest | Dashboard — tremor |
+| Dashboard — overview | Dashboard — tremor analytics |
 |:---:|:---:|
-| <img src="docs/images/dashboard_normal.jpg" alt="Dashboard at rest" width="380"> | <img src="docs/images/dashboard_tremor.jpg" alt="Dashboard with tremor detected" width="380"> |
+| <img src="docs/images/dashboard2_overview.png" alt="Dashboard overview" width="400"> | <img src="docs/images/dashboard2_tremor.png" alt="Tremor analytics page" width="400"> |
 
-*(Dashboard photos from pipeline 2.x; the 3.0.0 card set is described in [dashboard & API](docs/software/DASHBOARD_AND_API.md).)*
+*Screenshots from a simulated stream (labelled SIMULATED in the UI). Pages and quality semantics:
+[dashboard & API](docs/software/DASHBOARD_AND_API.md).*
 
 ## Validation status
 
@@ -137,13 +138,15 @@ parkinsense/            Python package
   replay/  datasets/    deterministic replay; dataset builder; leakage-safe splits
   analytics/            session biomarkers; personal baselines
   synthetic/            ground-truth signal generators
-  visualization/        Dash dashboard
+  visualization/        Dash dashboard (pages/, live feed client, session store, charts)
 firmware/
   parkinsense_wearable/ firmware 5.0.0, protocol v2 (not yet hardware-verified)
   legacy/               ble_stream_v4 (protocol v1, hardware-verified) and older sketches
   tests/                host tests for packet logic; API stubs
 tests/                  unit · integration · regression (golden) · synthetic · hardware
-benchmarks/             baseline-vs-current harness and committed results
+benchmarks/             baseline-vs-current harness, dashboard benchmark, committed results
+scripts/                launch-script helpers, doc link checker
+*.sh                    setup · start_parkinsense · start_runtime · start_dashboard · check · replay · clean
 data/reference/         real recordings used by the regression tests
 docs/                   documentation (index: docs/README.md)
 ```
@@ -153,9 +156,11 @@ docs/                   documentation (index: docs/README.md)
 ```bash
 git clone https://github.com/sudo-pranshu/ParkinSense.git && cd ParkinSense
 git checkout transform/engineering-overhaul
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[live,dashboard,dev]"
+./setup.sh                       # creates ./.venv (or reuses yours) and installs everything
 ```
+
+Needs Python ≥ 3.10. `./setup.sh --help` lists options; an existing environment is never
+deleted without `--recreate`. Manual alternative: `python -m venv .venv && .venv/bin/pip install -e ".[live,dashboard,dev]"`.
 
 Firmware: Arduino IDE 2.x with the Seeed nRF52 (Bluefruit-based) core, *Seeed Arduino LSM6DS3*
 and *SparkFun MAX3010x* libraries. Use `firmware/legacy/ble_stream_v4` for data collection until
@@ -164,23 +169,43 @@ Full guide: [installation](docs/getting-started/INSTALLATION.md).
 
 ## Quick start
 
-```bash
-parkinsense-live                                     # scan, connect, record to recordings/, serve :8000/metrics
-python -m parkinsense.visualization.dashboard        # http://127.0.0.1:8050
+**One command** (no venv activation needed):
 
-parkinsense-replay recordings/<session>/capture.csv --out replays/a
-parkinsense-replay data/reference/ble_v1_104hz/parkinsense_20260630_123551.csv   # no hardware needed
+```bash
+./start_parkinsense.sh --simulate          # no hardware: synthetic stream, clearly labelled
+./start_parkinsense.sh                     # wearable over BLE
+./start_parkinsense.sh --replay recordings/<session>/capture.csv     # watch a recording
+```
+
+It checks the environment and ports, refuses to start twice, waits until the runtime API and the
+dashboard answer, then prints **<http://127.0.0.1:8050>**. Logs go to `./logs/`. **Ctrl+C** stops the
+runtime first (session finalised, `metadata.json` → COMPLETE), then the dashboard.
+
+**Two terminals**, if you prefer:
+
+```bash
+./start_runtime.sh [--simulate]            # terminal 1: acquisition, analysis, recording, API :8000
+./start_dashboard.sh                       # terminal 2: http://127.0.0.1:8050 (restart any time)
+```
+
+**Offline**:
+
+```bash
+./replay.sh <session>                      # deterministic replay → replays/<session>_<time>/
+parkinsense-replay data/reference/ble_v1_104hz/parkinsense_20260630_123551.csv   # real reference data
 parkinsense-dataset recordings/*/capture.csv --out datasets/v1 --version 1.0.0
+./check.sh                                 # everything CI runs
 ```
 
 Each session directory holds `capture.csv` (79 columns, every raw sample plus window outputs
 marked by `is_analysis_row`) and `metadata.json` (versions, configuration, measured sample rate,
-packet loss, wraps, gaps, errors).
+packet loss, wraps, gaps, errors). Problems: [troubleshooting](docs/getting-started/TROUBLESHOOTING.md).
 
 ## Testing
 
 ```bash
-pytest                                                           # 64 passed, 1 deselected (hardware)
+./check.sh                                                       # lint, pytest, benchmark smoke, firmware, docs
+pytest                                                           # 84 passed, 1 deselected (hardware)
 python -m benchmarks.run_benchmarks --impl current --out benchmarks/results/current.json
 ```
 

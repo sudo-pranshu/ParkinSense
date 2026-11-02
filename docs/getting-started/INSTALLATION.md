@@ -19,9 +19,20 @@ data (sections 4–6).
 git clone https://github.com/sudo-pranshu/ParkinSense.git
 cd ParkinSense
 git checkout transform/engineering-overhaul
+./setup.sh                                              # creates or reuses ./.venv, installs all extras
+./check.sh --quick                                      # expect: 84 passed, 1 deselected
+```
+
+`setup.sh` reuses an active venv, `./.venv` or `./venv` and never deletes one unless you pass
+`--recreate`. The launch scripts find that environment themselves; no activation is needed.
+
+Windows (no bash): use WSL, or the manual route below and the `python -m …` commands shown in
+each section.
+
+```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[live,dashboard,dev]"
-pytest                                                   # expect: 64 passed, 1 deselected
+pytest
 ```
 
 `requirements.txt` lists the same dependencies for environments that cannot install in editable
@@ -39,8 +50,9 @@ Place a finger over the MAX30102: both firmware versions stream only while a fin
 ## 4. Record a session
 
 ```bash
-parkinsense-live                        # v5 reports its firmware version automatically
-parkinsense-live --firmware-version 4   # with v4, record it explicitly
+./start_parkinsense.sh                                   # runtime + dashboard (v5 reports its firmware version)
+./start_parkinsense.sh -- --firmware-version 4           # with v4, record it explicitly
+./start_runtime.sh                                       # runtime only (= python -m parkinsense.runtime.app)
 ```
 
 Expected log lines (from `runtime/app.py`):
@@ -57,15 +69,20 @@ reconnects into a new session. Files: [runtime and recording](../runtime/RUNTIME
 ## 5. Dashboard
 
 ```bash
-python -m parkinsense.visualization.dashboard      # http://127.0.0.1:8050
+./start_dashboard.sh          # http://127.0.0.1:8050  (= python -m parkinsense.visualization.dashboard)
 ```
 
-Live metrics are also served at `http://<host>:8000/metrics`. See
-[dashboard and API](../software/DASHBOARD_AND_API.md).
+The dashboard runs with or without the runtime and can be restarted at any time. Live data is
+also served at `http://127.0.0.1:8000/live` and `/metrics`. See
+[dashboard and API](../software/DASHBOARD_AND_API.md); problems:
+[troubleshooting](TROUBLESHOOTING.md).
 
 ## 6. Without hardware
 
 ```bash
+# the whole live stack on a synthetic stream (labelled SIMULATED everywhere)
+./start_parkinsense.sh --simulate
+
 # replay a bundled real recording through the full pipeline
 parkinsense-replay data/reference/ble_v1_104hz/parkinsense_20260630_123551.csv --out replays/demo
 
@@ -85,14 +102,5 @@ For the 87 s BLE recording, `session_report` returns `tremor_time_pct: None` wit
 
 ## 7. Troubleshooting
 
-| Symptom | Cause / fix |
-|---|---|
-| `device not found` | firmware not advertising, or no finger on the sensor (streaming is finger-gated); Bluetooth permission for the terminal (macOS) |
-| connects but no rows | finger gate closed; check serial output `finger detected -> streaming` |
-| `rate_status` WARN/INVALID | device sample rate off nominal; frequency outputs are flagged; check firmware build |
-| `hr_quality_state` `NO_CONTACT` / `INSUFFICIENT_DATA` | finger placement; HR needs ≥ 5 s of clean signal after the 1 s finger-on hysteresis |
-| RMSSD always empty with v4 | expected: v4 delivers 10 Hz PPG; HRV is withheld below 25 Hz |
-| `firmware_version` = `unknown` | v4 cannot report it; pass `--firmware-version` |
-| dashboard shows WAITING | runtime not running, or a different working directory: set `PARKINSENSE_METRICS` and `PARKINSENSE_LATEST` |
-| `ModuleNotFoundError: dash` / `bleak` | install extras: `pip install -e ".[live,dashboard]"` |
-| replay refuses a CSV | a ~23 Hz legacy log: add `--resample`; other formats: see [replay](../datasets/REPLAY_AND_DATASETS.md#supported-inputs-auto-detected) |
+See [troubleshooting](TROUBLESHOOTING.md): launch scripts, ports, environment, BLE, signal
+quality, dashboard states, replay.
