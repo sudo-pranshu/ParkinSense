@@ -26,6 +26,7 @@ parkinsense-live = "parkinsense.runtime.app:main"
 parkinsense-replay = "parkinsense.replay.replay:main"
 parkinsense-dataset = "parkinsense.datasets.builder:main"
 parkinsense-sleep = "parkinsense.sleep.api:main"
+parkinsense-wear = "parkinsense.wear.api:main"
 
 [tool.setuptools.packages.find]
 include = ["parkinsense*"]

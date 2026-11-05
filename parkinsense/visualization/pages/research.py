@@ -52,7 +52,7 @@ def layout():
 
 def config_view():
     pairs = [("pipeline", C.PIPELINE_VERSION), ("capture schema", C.CAPTURE_SCHEMA_VERSION),
-             ("tremor algorithm", C.TREMOR_ALGORITHM_VERSION), ("step counter (config value)", C.STEP_COUNTER_VERSION),
+             ("tremor algorithm", C.TREMOR_ALGORITHM_VERSION), ("default step counter", C.STEP_ALGORITHM_VERSIONS["default"]),
              ("PPG", C.PPG_VERSION), ("nominal rate", f"{C.SAMPLE_RATE_HZ} Hz"),
              ("window / hop", f"{C.WINDOW_SAMPLES} / {C.ANALYSIS_HOP_SAMPLES} samples"),
              ("tremor band", f"{C.TREMOR_BAND_HZ[0]}–{C.TREMOR_BAND_HZ[1]} Hz"),

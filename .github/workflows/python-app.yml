@@ -44,6 +44,13 @@ jobs:
       run: |
         cp firmware/parkinsense_wearable/parkinsense_wearable.ino /tmp/sketch.cpp
         g++ -std=c++17 -Wall -Wextra -fsyntax-only -I firmware/tests/stubs -I firmware/parkinsense_wearable /tmp/sketch.cpp
+    - name: Sketch type-check, continuous profile (REQUIRE_FINGER_FOR_STREAMING = false)
+      run: |
+        mkdir /tmp/profileB && cp firmware/parkinsense_wearable/* /tmp/profileB/
+        sed -i 's/REQUIRE_FINGER_FOR_STREAMING = true/REQUIRE_FINGER_FOR_STREAMING = false/' /tmp/profileB/config.h
+        grep -q 'REQUIRE_FINGER_FOR_STREAMING = false' /tmp/profileB/config.h
+        cp /tmp/profileB/parkinsense_wearable.ino /tmp/profileB/sketch.cpp
+        g++ -std=c++17 -Wall -Wextra -fsyntax-only -I firmware/tests/stubs -I /tmp/profileB /tmp/profileB/sketch.cpp
 
   docs:
     runs-on: ubuntu-latest

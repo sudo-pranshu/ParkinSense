@@ -84,7 +84,8 @@ class SessionRecorder:
             "capture_schema_version": C.CAPTURE_SCHEMA_VERSION,
             "pipeline_version": C.PIPELINE_VERSION,
             "tremor_algorithm_version": C.TREMOR_ALGORITHM_VERSION,
-            "step_counter_version": C.STEP_COUNTER_VERSION,
+            "metadata_revision": C.METADATA_REVISION,
+            "step_counter_version": C.STEP_ALGORITHM_VERSIONS[e.step_algorithm],
             "step_algorithm": e.step_algorithm,
             "step_algorithm_version": C.STEP_ALGORITHM_VERSIONS[e.step_algorithm],
             "sleep_algorithm_version": C.SLEEP_ALGORITHM_VERSION,
@@ -110,6 +111,7 @@ class SessionRecorder:
             "device": self.device,
             "host": {"platform": platform.platform(), "python": platform.python_version()},
             "notes": self.notes,
+            **({"wear": e.wear.summary()} if e.wear is not None else {}),
         }
 
     def write_metadata(self, status="RECORDING") -> None:

@@ -37,6 +37,7 @@ from parkinsense.activity.step_counter_v2 import GatedStepCounter
 from parkinsense.motion.pipeline import MotionPipeline
 from parkinsense.ppg.processor import PPGProcessor
 from parkinsense.protocol import packet as P
+from parkinsense.wear import WearConfig, WearMonitor
 
 log = logging.getLogger("parkinsense.runtime")
 
@@ -96,7 +97,8 @@ class PacketResult:
 class RuntimeEngine:
     def __init__(self, fs: float = C.SAMPLE_RATE_HZ, hop_samples: int = C.ANALYSIS_HOP_SAMPLES,
                  window_samples: int = C.WINDOW_SAMPLES, firmware_version: str = "unknown",
-                 session_id: str | None = None, step_counter: str = "default"):
+                 session_id: str | None = None, step_counter: str = "default",
+                 wear_monitor: "bool | WearConfig" = False):
         self.fs = fs
         self.hop = hop_samples
         self.window = window_samples
@@ -109,6 +111,12 @@ class RuntimeEngine:
         if step_counter not in counters:
             raise ValueError(f"unknown step_counter {step_counter!r}; choose one of {sorted(counters)}")
         self.step_algorithm = step_counter
+        # Opt-in wear-state inference (Phase 8). Off by default: with it off, behaviour and outputs are
+        # exactly those of 3.0.0 (golden replay regression). See docs/architecture/WEAR_AWARE_ACQUISITION.md.
+        self.wear: WearMonitor | None = None
+        if wear_monitor:
+            cfg = wear_monitor if isinstance(wear_monitor, WearConfig) else WearConfig(expected_rate_hz=fs)
+            self.wear = WearMonitor(cfg)
         self.steps = counters[step_counter](sample_rate=fs)
         self._step_gate: str | None = None
 
@@ -192,6 +200,9 @@ class RuntimeEngine:
         if self._t0_us is None:
             self._t0_us = first_us
 
+        if self.wear is not None:
+            self._feed_wear(pkt)
+
         for s in pkt.samples:
             self.sample_count += 1
             t = (s.device_time_us - self._t0_us) / 1e6
@@ -219,6 +230,18 @@ class RuntimeEngine:
                                           gap_s if s.index_in_packet == 0 else 0.0))
         return res
 
+    def _feed_wear(self, pkt: P.Packet) -> None:
+        """Hand a packet to the wear monitor. Packet flags are per packet, so a fault flag marks all 10 samples."""
+        n = len(pkt.samples)
+        t = np.fromiter(((x.device_time_us - self._t0_us) / 1e6 for x in pkt.samples), float, n)
+        acc = np.array([(x.ax, x.ay, x.az) for x in pkt.samples], float)
+        gyro = np.array([(x.gx, x.gy, x.gz) for x in pkt.samples], float)
+        ir = np.fromiter((x.ir for x in pkt.samples), float, n)
+        flags = int(pkt.flags)
+        imu_ok = np.full(n, not flags & P.PacketFlags.IMU_FAULT)
+        ppg_ok = np.full(n, not flags & P.PacketFlags.PPG_FAULT)
+        self.wear.update_block(t, acc, gyro, ir, imu_ok, ppg_ok)
+
     def _needs_first_analysis(self):
         return self.metrics.get("_reset_marker") != self.resets
 
@@ -238,6 +261,8 @@ class RuntimeEngine:
             r = m["result"]
             self._step_gate = ("REST" if r["tremor"] and r["tremor_type"] == "REST"
                                else self._motion_state)
+            if self.wear is not None and not self.wear.status.activity_allowed:
+                self._step_gate = "REST"       # inferred REMOVED: table movement is not user activity
             if self._step is None:
                 self._step = self.steps.update(*accel[:, -1], self._step_gate, now=t)
             motion_freqs = [m["features"].arm_peak_frequency_hz] if m["features"].arm_rms_dps >= 10 else []
@@ -293,7 +318,7 @@ class RuntimeEngine:
             "timestamp": t, "signal_time_s": round(t, 4),
             "motion_pipeline_state": ctx["state"],
             "pipeline_version": C.PIPELINE_VERSION, "firmware_version": self.firmware_version,
-            "step_counter_version": C.STEP_COUNTER_VERSION, "ppg_version": C.PPG_VERSION,
+            "step_counter_version": C.STEP_ALGORITHM_VERSIONS[self.step_algorithm], "ppg_version": C.PPG_VERSION,
             # v3
             "analysis_seq": self.analysis_seq,
             **{k: r[k] for k in ("tremor_state", "tremor_probability", "tremor_evidence", "tremor_type",
@@ -338,7 +363,7 @@ class RuntimeEngine:
             "sampling_rate": m.get("sampling_rate"),
             "packet_version": pkt.version, "flags": pkt.flags,
             "pipeline_version": C.PIPELINE_VERSION, "firmware_version": self.firmware_version,
-            "step_counter_version": C.STEP_COUNTER_VERSION, "ppg_version": C.PPG_VERSION,
+            "step_counter_version": C.STEP_ALGORITHM_VERSIONS[self.step_algorithm], "ppg_version": C.PPG_VERSION,
             "session_id": self.session_id, "host_monotonic": host_mono,
             "device_time_us": s.device_time_us, "packet_seq": pkt.seq, "packets_lost": lost,
             "gap_before_s": gap_s, "possibly_clipped": s.possibly_clipped,

@@ -25,11 +25,18 @@ from enum import Enum
 PIPELINE_VERSION = "3.0.0"
 CAPTURE_SCHEMA_VERSION = "3"
 TREMOR_ALGORITHM_VERSION = "3.0"
-STEP_COUNTER_VERSION = "2.0"
 PPG_VERSION = "2.0"
-# Explicit per-algorithm step versions (STEP_COUNTER_VERSION above is the historical metadata field and is
-# left unchanged; it does not identify the algorithm - see docs/decisions/0011-step-algorithm-versioning.md).
+# Version of each selectable step algorithm. This is the single source of truth.
 STEP_ALGORITHM_VERSIONS = {"default": "1.1", "periodic": "2.0", "gated": "3.0-dev"}
+# Deprecated alias: the version of the DEFAULT step counter. Until Phase 8 this constant read "2.0" and was
+# written into every recording although the default counter is v1.1 (audit D1). Recordings made before the
+# correction keep the old label; use `step_algorithm_version_of()` to interpret any recording.
+# See docs/decisions/0013-step-version-label-correction.md.
+STEP_COUNTER_VERSION = STEP_ALGORITHM_VERSIONS["default"]
+LEGACY_STEP_COUNTER_LABEL = "2.0"
+# metadata.json revision: 1 = no key (all recordings before Phase 8); 2 = step_counter_version names the
+# algorithm that actually ran. Additive: no capture column was added, removed or renamed.
+METADATA_REVISION = 2
 SLEEP_ALGORITHM_VERSION = "1.0"
 SLEEP_EPOCH_SCHEMA_VERSION = "1"
 
@@ -113,3 +120,23 @@ ANALYSIS_BAND_HZ = (0.5, 15.0)
 DEFAULT_API_PORT = 8000
 DEFAULT_DASHBOARD_PORT = 8050
 METRICS_FILENAME = "realtime_metrics_v2.json"   # historical name kept for the dashboard/app
+
+
+def step_algorithm_version_of(step_counter_version: str | None = None, step_algorithm: str | None = None,
+                              metadata_revision: int | None = None) -> str | None:
+    """
+    The version of the step algorithm that produced a recording, from whatever its metadata or capture holds.
+
+      * `step_algorithm` present (metadata.json since Phase 7)  -> STEP_ALGORITHM_VERSIONS[step_algorithm]
+      * revision >= 2                                          -> `step_counter_version` as recorded
+      * otherwise the label is the legacy constant: every such recording was produced by the default counter
+        (v1.1) because no other counter was selectable before Phase 7, so the label "2.0" is read as "1.1".
+    """
+    if step_algorithm in STEP_ALGORITHM_VERSIONS:
+        return STEP_ALGORITHM_VERSIONS[step_algorithm]
+    if (metadata_revision or 1) >= 2:
+        return step_counter_version
+    if step_counter_version in (None, ""):
+        return None
+    return STEP_ALGORITHM_VERSIONS["default"] if step_counter_version == LEGACY_STEP_COUNTER_LABEL \
+        else step_counter_version
