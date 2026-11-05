@@ -21,7 +21,7 @@ from dash import Dash, Input, Output, dcc, html
 from parkinsense import config as C
 from parkinsense.visualization import datasource as DS
 from parkinsense.visualization.datasource import read_tail  # noqa: F401  (public helper, kept for compatibility)
-from parkinsense.visualization.pages import activity, cardio, live, overview, research, sessions_page, tremor
+from parkinsense.visualization.pages import activity, cardio, live, overview, research, sessions_page, sleep, tremor
 
 PAGES = [
     ("/", "Overview", overview),
@@ -29,6 +29,7 @@ PAGES = [
     ("/tremor", "Tremor analytics", tremor),
     ("/cardio", "Cardiovascular", cardio),
     ("/activity", "Activity", activity),
+    ("/sleep", "Sleep (estimate)", sleep),
     ("/sessions", "Sessions", sessions_page),
     ("/research", "Data & research", research),
 ]

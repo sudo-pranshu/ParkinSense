@@ -33,6 +33,7 @@ import numpy as np
 from parkinsense import config as C
 from parkinsense.activity.step_counter import StepCounter
 from parkinsense.activity.step_counter_periodic import PeriodicStepCounter
+from parkinsense.activity.step_counter_v2 import GatedStepCounter
 from parkinsense.motion.pipeline import MotionPipeline
 from parkinsense.ppg.processor import PPGProcessor
 from parkinsense.protocol import packet as P
@@ -104,7 +105,11 @@ class RuntimeEngine:
 
         self.motion = MotionPipeline(fs)
         self.ppg = PPGProcessor(sample_rate=C.PPG_SLOT_RATE_HZ, window_seconds=C.PPG_WINDOW_SECONDS)
-        self.steps = (PeriodicStepCounter if step_counter == "periodic" else StepCounter)(sample_rate=fs)
+        counters = {"default": StepCounter, "periodic": PeriodicStepCounter, "gated": GatedStepCounter}
+        if step_counter not in counters:
+            raise ValueError(f"unknown step_counter {step_counter!r}; choose one of {sorted(counters)}")
+        self.step_algorithm = step_counter
+        self.steps = counters[step_counter](sample_rate=fs)
         self._step_gate: str | None = None
 
         self.unwrapper = P.TimestampUnwrapper()

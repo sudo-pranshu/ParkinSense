@@ -27,6 +27,11 @@ CAPTURE_SCHEMA_VERSION = "3"
 TREMOR_ALGORITHM_VERSION = "3.0"
 STEP_COUNTER_VERSION = "2.0"
 PPG_VERSION = "2.0"
+# Explicit per-algorithm step versions (STEP_COUNTER_VERSION above is the historical metadata field and is
+# left unchanged; it does not identify the algorithm - see docs/decisions/0011-step-algorithm-versioning.md).
+STEP_ALGORITHM_VERSIONS = {"default": "1.1", "periodic": "2.0", "gated": "3.0-dev"}
+SLEEP_ALGORITHM_VERSION = "1.0"
+SLEEP_EPOCH_SCHEMA_VERSION = "1"
 
 # ---------------------------------------------------------------------------
 # Sampling

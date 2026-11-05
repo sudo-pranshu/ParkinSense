@@ -12,6 +12,7 @@ Every page states what is validated and what is not.
 | [Troubleshooting](getting-started/TROUBLESHOOTING.md) | launch scripts, ports, environment, BLE, signal quality, dashboard states |
 | [Architecture](architecture/ARCHITECTURE.md) | layers, data flow, module map, design principles |
 | [Validation results](validation/RESULTS.md) | baseline vs current numbers and what they do (not) mean |
+| [Sleep & step validation](validation/SLEEP_STEP_VALIDATION.md) | public-dataset results for sleep and steps (not ParkinSense hardware) |
 
 ## Reference
 
@@ -31,7 +32,8 @@ Every page states what is validated and what is not.
 |---|---|
 | [Motion & tremor](algorithms/MOTION_AND_TREMOR.md) | Welch PSD, peak interpolation, amplitude, SNR, harmonic rejection, motion context, evidence, HMM |
 | [PPG](algorithms/PPG.md) | sampling contract, finger detection, SQI, HR, motion coupling, HRV, SpO₂ estimate |
-| [Activity](algorithms/ACTIVITY.md) | default step counter, experimental periodic counter |
+| [Activity](algorithms/ACTIVITY.md) | default step counter, experimental periodic and gated counters, [acceptance rule](algorithms/STEP_ACCEPTANCE.md) |
+| [Sleep](algorithms/SLEEP.md) | movement-derived sleep/wake estimate: features, classifier, night summary, limits |
 | [Biomarkers](biomarkers/BIOMARKERS.md) | every metric's definition and status, aggregates, personal baselines, feasibility of the rest |
 
 ## Quality and process

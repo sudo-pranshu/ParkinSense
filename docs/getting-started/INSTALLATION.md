@@ -20,7 +20,7 @@ git clone https://github.com/sudo-pranshu/ParkinSense.git
 cd ParkinSense
 git checkout transform/engineering-overhaul
 ./setup.sh                                              # creates or reuses ./.venv, installs all extras
-./check.sh --quick                                      # expect: 84 passed, 1 deselected
+./check.sh --quick                                      # expect: 110 passed, 1 deselected
 ```
 
 `setup.sh` reuses an active venv, `./.venv` or `./venv` and never deletes one unless you pass

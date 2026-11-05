@@ -33,6 +33,9 @@ useful than its current state.
 | [0007](0007-tremor-hmm.md) | HMM temporal filter publishes the tremor classification | Accepted (supersedes the count state machine) |
 | [0008](0008-ppg-rate-and-quality.md) | PPG at the true slot rate, owned state, explicit quality | Accepted |
 | [0009](0009-step-counter-acceptance.md) | Keep the v1 step-detection algorithm; rewrite stays experimental | Accepted |
+| [0010](0010-sleep-subsystem.md) | Sleep subsystem: offline, accelerometer-only, logistic regression | Accepted |
+| [0011](0011-step-algorithm-versioning.md) | Explicit per-algorithm versions; selectable step algorithm | Accepted |
+| [0012](0012-gated-step-counter-opt-in.md) | Gated step counter stays opt-in | Accepted |
 
 ## Template
 

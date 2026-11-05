@@ -5,7 +5,7 @@
 | Command | What it runs | Expected (this branch, laptop) |
 |---|---|---|
 | `./check.sh` | everything CI runs (lint, pytest, benchmark smoke, firmware host tests, doc links) | `✔ all checks passed`, ~1 min |
-| `pytest` | all non-hardware tests | `84 passed, 1 deselected` in ~50 s |
+| `pytest` | all non-hardware tests | `110 passed, 1 deselected` in ~50 s |
 | `pytest tests/unit` | unit tests | 36 passed, ~6 s |
 | `pytest -m hardware` | hardware placeholder | skipped unless `PARKINSENSE_DEVICE` is set |
 | `flake8 parkinsense tests benchmarks --select=E9,F63,F7,F82,F401,F811,F841` | lint (errors only) | `0` |

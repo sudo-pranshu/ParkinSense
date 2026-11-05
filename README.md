@@ -133,7 +133,8 @@ parkinsense/            Python package
   protocol/             BLE packet decode/encode (v1, v2), unwrap, loss/gap tracking
   motion/  tremor/      filters, spectral features, motion context, tremor evidence, HMM
   ppg/                  PPG processor (state, quality) and algorithms (DSP)
-  activity/             step counter (default) + experimental periodic counter
+  activity/             step counter (default) + experimental periodic and gated counters
+  sleep/                offline movement-derived sleep/wake estimate (accelerometer only)
   runtime/              engine (pure), recorder (files), app (BLE + FastAPI)
   replay/  datasets/    deterministic replay; dataset builder; leakage-safe splits
   analytics/            session biomarkers; personal baselines
@@ -205,7 +206,7 @@ packet loss, wraps, gaps, errors). Problems: [troubleshooting](docs/getting-star
 
 ```bash
 ./check.sh                                                       # lint, pytest, benchmark smoke, firmware, docs
-pytest                                                           # 84 passed, 1 deselected (hardware)
+pytest                                                           # 110 passed, 1 deselected (hardware)
 python -m benchmarks.run_benchmarks --impl current --out benchmarks/results/current.json
 ```
 
@@ -226,7 +227,12 @@ decision records · references · reports.
 * Physiological and pathological tremor cannot be separated from frequency and amplitude alone.
 * Tremor confirmation takes ~6 s from onset (deliberate, to suppress false alarms).
 * Heart rate during rhythmic movement is often wrong — flagged `MOTION_ARTIFACT`, not corrected.
-* Purposeful arm movement produces false steps.
+* Purposeful arm movement produces false steps (production counter: +299 % on irregular movement in the Clemson
+  recordings with the motion gate held on; an opt-in gated counter fixes that but regresses on semi-regular walking, so it is
+  not the default — [validation](docs/validation/SLEEP_STEP_VALIDATION.md)).
+* Sleep is an offline *estimate* from wrist movement: no stages, not polysomnography, κ 0.50 vs PSG on 17 public-dataset
+  subjects, not validated on ParkinSense hardware or in Parkinson's disease, and impossible overnight with the current firmware
+  ([hardware limits](docs/hardware/SLEEP_STEP_HARDWARE_LIMITS.md)).
 * Firmware ≤ v4: PPG effectively 10 Hz (no HRV), gyro wraps above 250 dps.
 * Streaming requires a finger on the PPG sensor, which rules out tremor-only and overnight use.
 * No power measurements exist for any firmware.
