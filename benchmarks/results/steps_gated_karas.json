@@ -1,0 +1,395 @@
+{
+ "benchmark": "steps_real_wrist",
+ "created_utc": "2026-11-05T19:22:38Z",
+ "pipeline_version": "3.0.0",
+ "counters": [
+  "gated"
+ ],
+ "tolerance_s": 0.3,
+ "gate": "ACTIVE (constant)",
+ "resampled_to_hz": 104.0,
+ "datasets": {
+  "clemson": {
+   "dataset": "clemson_pedometer",
+   "citation": "Mattfeld R., Jesch E., Hoover A. A new dataset for evaluating pedometer performance. IEEE BIBM 2017, doi:10.1109/BIBM.2017.8217769",
+   "licence": "per upstream Pedometer Evaluation Project terms (cecas.clemson.edu/~ahoover/pedometer); not redistributed here",
+   "source": "prepared copy github.com/ChaddBrenner/mattfeld_research_data (timelines aligned, channels min-max normalised over all participants)",
+   "placement": "wrist (Shimmer3, Sensor01), 15 Hz",
+   "labels": "annotated left/right foot contacts ('l','r'); 'ledge'/'redge' kept separately",
+   "preprocessing_here": "per-channel affine re-calibration to g (autocalibrate on the least-variable 1 s windows pooled over all 90 files); gyroscope unused (scale unrecoverable)"
+  },
+  "karas": {
+   "dataset": "karas2021_walk_climb_drive",
+   "citation": "Karas M. et al. (2021) Labeled raw accelerometry data captured during walking, stair climbing and driving. PhysioNet, doi:10.13026/51h0-a262",
+   "licence": "Open Data Commons Open Database License v1.0",
+   "placement": "left wrist (ActiGraph GT3X+), 100 Hz; ankles used only for the derived step reference",
+   "labels": "activity per sample: 1 walking, 2 stairs down, 3 stairs up, 4 driving, 77 clapping, 99 non-study. No step annotations: walking steps are a DERIVED reference from the ankle sensors (see benchmarks/steps_bench.py), not a manual count"
+  }
+ },
+ "karas": {
+  "per_subject": [
+   {
+    "subject": "id00b70b13",
+    "walk_min": 11.222596153846155,
+    "nonwalk_min": 22.012660256410257,
+    "gated": {
+     "steps_in_walking": 868,
+     "false_steps_nonwalking": 78,
+     "false_steps_per_min": 3.543415429640577,
+     "walking_sensitivity": 0.8263719316283255,
+     "walking_specificity_labelled": 0.9657321325868709,
+     "steps_per_walking_min": 77.34395750332004
+    }
+   },
+   {
+    "subject": "id079c763c",
+    "walk_min": 11.015705128205129,
+    "nonwalk_min": 23.821955128205126,
+    "gated": {
+     "steps_in_walking": 1102,
+     "false_steps_nonwalking": 98,
+     "false_steps_per_min": 4.113852094531413,
+     "walking_sensitivity": 0.8108615321947104,
+     "walking_specificity_labelled": 0.9617420904277862,
+     "steps_per_walking_min": 100.03898862346882
+    }
+   },
+   {
+    "subject": "id1165e00c",
+    "walk_min": 11.923557692307693,
+    "nonwalk_min": 24.88605769230769,
+    "gated": {
+     "steps_in_walking": 1234,
+     "false_steps_nonwalking": 116,
+     "false_steps_per_min": 4.661244518285262,
+     "walking_sensitivity": 0.928470626184428,
+     "walking_specificity_labelled": 0.9646530018224085,
+     "steps_per_walking_min": 103.49260110479416
+    }
+   },
+   {
+    "subject": "id1c7e64ad",
+    "walk_min": 13.331410256410257,
+    "nonwalk_min": 24.33269230769231,
+    "gated": {
+     "steps_in_walking": 1461,
+     "false_steps_nonwalking": 93,
+     "false_steps_per_min": 3.8220184936378723,
+     "walking_sensitivity": 0.9579867288551234,
+     "walking_specificity_labelled": 0.9657722806185621,
+     "steps_per_walking_min": 109.59080636630283
+    }
+   },
+   {
+    "subject": "id34e056c8",
+    "walk_min": 11.152564102564103,
+    "nonwalk_min": 30.404006410256407,
+    "gated": {
+     "steps_in_walking": 1320,
+     "false_steps_nonwalking": 114,
+     "false_steps_per_min": 3.7495058533319985,
+     "walking_sensitivity": 0.9071588688354983,
+     "walking_specificity_labelled": 0.9733661534569183,
+     "steps_per_walking_min": 118.35843200367859
+    }
+   },
+   {
+    "subject": "id37a54bbf",
+    "walk_min": 11.945192307692308,
+    "nonwalk_min": 19.558814102564103,
+    "gated": {
+     "steps_in_walking": 1245,
+     "false_steps_nonwalking": 118,
+     "false_steps_per_min": 6.033085614558326,
+     "walking_sensitivity": 0.9124473422952051,
+     "walking_specificity_labelled": 0.9495522216850886,
+     "steps_per_walking_min": 104.2260323593335
+    }
+   },
+   {
+    "subject": "id3e3e50c7",
+    "walk_min": 9.754326923076922,
+    "nonwalk_min": 19.058974358974357,
+    "gated": {
+     "steps_in_walking": 993,
+     "false_steps_nonwalking": 63,
+     "false_steps_per_min": 3.3055293959370378,
+     "walking_sensitivity": 0.8250940575352819,
+     "walking_specificity_labelled": 0.9742617381945379,
+     "steps_per_walking_min": 101.80097589827001
+    }
+   },
+   {
+    "subject": "id4ea159a8",
+    "walk_min": 10.025961538461537,
+    "nonwalk_min": 22.808012820512822,
+    "gated": {
+     "steps_in_walking": 1179,
+     "false_steps_nonwalking": 115,
+     "false_steps_per_min": 5.042087660375767,
+     "walking_sensitivity": 0.9364150762443656,
+     "walking_specificity_labelled": 0.957476707747221,
+     "steps_per_walking_min": 117.59470605159683
+    }
+   },
+   {
+    "subject": "id5308a7d6",
+    "walk_min": 12.028846153846155,
+    "nonwalk_min": 26.166025641025644,
+    "gated": {
+     "steps_in_walking": 1283,
+     "false_steps_nonwalking": 115,
+     "false_steps_per_min": 4.3950121267057005,
+     "walking_sensitivity": 0.8865041300293098,
+     "walking_specificity_labelled": 0.964060854014062,
+     "steps_per_walking_min": 106.66027178257393
+    }
+   },
+   {
+    "subject": "id5993bf4a",
+    "walk_min": 10.553365384615384,
+    "nonwalk_min": 18.89391025641026,
+    "gated": {
+     "steps_in_walking": 1116,
+     "false_steps_nonwalking": 103,
+     "false_steps_per_min": 5.4514919676330384,
+     "walking_sensitivity": 0.8619349156454528,
+     "walking_specificity_labelled": 0.949600502128959,
+     "steps_per_walking_min": 105.74825748257483
+    }
+   },
+   {
+    "subject": "id650857ca",
+    "walk_min": 11.826282051282051,
+    "nonwalk_min": 20.06891025641026,
+    "gated": {
+     "steps_in_walking": 1315,
+     "false_steps_nonwalking": 87,
+     "false_steps_per_min": 4.335063483190928,
+     "walking_sensitivity": 0.9525042007696894,
+     "walking_specificity_labelled": 0.9695600095823684,
+     "steps_per_walking_min": 111.19301859179359
+    }
+   },
+   {
+    "subject": "id687ab496",
+    "walk_min": 10.63125,
+    "nonwalk_min": 24.196153846153845,
+    "gated": {
+     "steps_in_walking": 1182,
+     "false_steps_nonwalking": 95,
+     "false_steps_per_min": 3.9262438404069306,
+     "walking_sensitivity": 0.9822427229834637,
+     "walking_specificity_labelled": 0.9616979282572988,
+     "steps_per_walking_min": 111.18165784832452
+    }
+   },
+   {
+    "subject": "id7c20ee7a",
+    "walk_min": 12.54326923076923,
+    "nonwalk_min": 23.110256410256408,
+    "gated": {
+     "steps_in_walking": 1260,
+     "false_steps_nonwalking": 117,
+     "false_steps_per_min": 5.062687229557307,
+     "walking_sensitivity": 0.9002299731697968,
+     "walking_specificity_labelled": 0.9624778098302452,
+     "steps_per_walking_min": 100.45228056726715
+    }
+   },
+   {
+    "subject": "id82b9735c",
+    "walk_min": 10.353044871794872,
+    "nonwalk_min": 24.013621794871792,
+    "gated": {
+     "steps_in_walking": 1025,
+     "false_steps_nonwalking": 96,
+     "false_steps_per_min": 3.997730988688312,
+     "walking_sensitivity": 0.8940606473383589,
+     "walking_specificity_labelled": 0.972404818312256,
+     "steps_per_walking_min": 99.00469018466634
+    }
+   },
+   {
+    "subject": "id86237981",
+    "walk_min": 11.755929487179488,
+    "nonwalk_min": 20.89903846153846,
+    "gated": {
+     "steps_in_walking": 1297,
+     "false_steps_nonwalking": 107,
+     "false_steps_per_min": 5.119852772026685,
+     "walking_sensitivity": 0.9815695843614106,
+     "walking_specificity_labelled": 0.9626485698949467,
+     "steps_per_walking_min": 110.32730346115571
+    }
+   },
+   {
+    "subject": "id8af5374b",
+    "walk_min": 11.678846153846155,
+    "nonwalk_min": 24.295032051282053,
+    "gated": {
+     "steps_in_walking": 1105,
+     "false_steps_nonwalking": 71,
+     "false_steps_per_min": 2.922408163534541,
+     "walking_sensitivity": 0.8576074427795158,
+     "walking_specificity_labelled": 0.9770516025619884,
+     "steps_per_walking_min": 94.61551127943355
+    }
+   },
+   {
+    "subject": "id8e66893c",
+    "walk_min": 10.637660256410255,
+    "nonwalk_min": 25.307852564102564,
+    "gated": {
+     "steps_in_walking": 1169,
+     "false_steps_nonwalking": 177,
+     "false_steps_per_min": 6.993876685178032,
+     "walking_sensitivity": 0.9719037647448742,
+     "walking_specificity_labelled": 0.9346825311389872,
+     "steps_per_walking_min": 109.89258651079409
+    }
+   },
+   {
+    "subject": "idb221f542",
+    "walk_min": 10.077083333333333,
+    "nonwalk_min": 23.73205128205128,
+    "gated": {
+     "steps_in_walking": 1102,
+     "false_steps_nonwalking": 66,
+     "false_steps_per_min": 2.7810491059370106,
+     "walking_sensitivity": 0.882683163435696,
+     "walking_specificity_labelled": 0.9822740532656259,
+     "steps_per_walking_min": 109.35703948728552
+    }
+   },
+   {
+    "subject": "idbae5a811",
+    "walk_min": 10.026762820512822,
+    "nonwalk_min": 40.992628205128206,
+    "gated": {
+     "steps_in_walking": 1161,
+     "false_steps_nonwalking": 128,
+     "false_steps_per_min": 3.1225126468955486,
+     "walking_sensitivity": 0.8479709751146771,
+     "walking_specificity_labelled": 0.9717155210833718,
+     "steps_per_walking_min": 115.7901129988652
+    }
+   },
+   {
+    "subject": "idc735fc09",
+    "walk_min": 9.311698717948719,
+    "nonwalk_min": 24.75480769230769,
+    "gated": {
+     "steps_in_walking": 916,
+     "false_steps_nonwalking": 66,
+     "false_steps_per_min": 2.6661487667508257,
+     "walking_sensitivity": 0.8508562085879012,
+     "walking_specificity_labelled": 0.9817246067197514,
+     "steps_per_walking_min": 98.3708803028999
+    }
+   },
+   {
+    "subject": "idc91a49d0",
+    "walk_min": 11.498397435897436,
+    "nonwalk_min": 23.585576923076925,
+    "gated": {
+     "steps_in_walking": 1227,
+     "false_steps_nonwalking": 80,
+     "false_steps_per_min": 3.3919034612091807,
+     "walking_sensitivity": 0.9309965156794425,
+     "walking_specificity_labelled": 0.9717001644312174,
+     "steps_per_walking_min": 106.71052264808363
+    }
+   },
+   {
+    "subject": "idecc9265e",
+    "walk_min": 12.064743589743589,
+    "nonwalk_min": 23.957852564102563,
+    "gated": {
+     "steps_in_walking": 1210,
+     "false_steps_nonwalking": 116,
+     "false_steps_per_min": 4.841836291029252,
+     "walking_sensitivity": 0.9668721109399075,
+     "walking_specificity_labelled": 0.9633771915155488,
+     "steps_per_walking_min": 100.29222676797195
+    }
+   },
+   {
+    "subject": "idf1ce9a0f",
+    "walk_min": 11.116346153846155,
+    "nonwalk_min": 21.56330128205128,
+    "gated": {
+     "steps_in_walking": 1120,
+     "false_steps_nonwalking": 84,
+     "false_steps_per_min": 3.895507413325406,
+     "walking_sensitivity": 0.8904074042037886,
+     "walking_specificity_labelled": 0.9673367767827282,
+     "steps_per_walking_min": 100.75253005795345
+    }
+   },
+   {
+    "subject": "idf540d82b",
+    "walk_min": 12.886698717948718,
+    "nonwalk_min": 18.3849358974359,
+    "gated": {
+     "steps_in_walking": 1417,
+     "false_steps_nonwalking": 71,
+     "false_steps_per_min": 3.861857359529994,
+     "walking_sensitivity": 0.970228694365339,
+     "walking_specificity_labelled": 0.9625703875455449,
+     "steps_per_walking_min": 109.95834006939177
+    }
+   },
+   {
+    "subject": "idf5e3678b",
+    "walk_min": 10.474038461538463,
+    "nonwalk_min": 23.215865384615384,
+    "gated": {
+     "steps_in_walking": 1007,
+     "false_steps_nonwalking": 81,
+     "false_steps_per_min": 3.488993352523349,
+     "walking_sensitivity": 0.847899262523333,
+     "walking_specificity_labelled": 0.9732444241959867,
+     "steps_per_walking_min": 96.14247681997612
+    }
+   },
+   {
+    "subject": "idfc5f05e4",
+    "walk_min": 8.575801282051282,
+    "nonwalk_min": 21.866666666666667,
+    "gated": {
+     "steps_in_walking": 1029,
+     "false_steps_nonwalking": 68,
+     "false_steps_per_min": 3.1097560975609757,
+     "walking_sensitivity": 0.8790200512025116,
+     "walking_specificity_labelled": 0.9733378283302064,
+     "steps_per_walking_min": 119.98878777119579
+    }
+   },
+   {
+    "subject": "idff99de96",
+    "walk_min": 11.392948717948718,
+    "nonwalk_min": 25.21778846153846,
+    "gated": {
+     "steps_in_walking": 1141,
+     "false_steps_nonwalking": 94,
+     "false_steps_per_min": 3.727527500810249,
+     "walking_sensitivity": 0.8510521577674,
+     "walking_specificity_labelled": 0.9701002167019364,
+     "steps_per_walking_min": 100.14966522252855
+    }
+   }
+  ],
+  "summary": {
+   "gated": {
+    "subjects": 27,
+    "nonwalking_minutes": 641.1054487179487,
+    "false_steps_per_min": 4.082011789532204,
+    "walking_state_sensitivity": 0.9004203736820299,
+    "walking_state_specificity": 0.9660785971419414,
+    "steps_per_walking_min": 105.1494318431667
+   }
+  }
+ },
+ "runtime_s": 118.4
+}

@@ -57,6 +57,7 @@ flowchart LR
 | **Tremor analytics** | tremor time / frequency / power summary (analytics thresholds), P(tremor) with published-TREMOR shading, frequency and amplitude per detected window, tremor power vs purposeful arm movement, motion context, detected episodes table, **click a window → its gyro PSD**, multi-session comparison | live buffer or any session |
 | **Cardiovascular** | HR coloured by quality with motion-artefact and no-contact shading, RMSSD/SDNN (or the reason HRV is withheld), SQI and HR confidence, SpO₂ under a permanent *uncalibrated estimate* banner | live buffer or any session |
 | **Activity** | cumulative steps with walking shading, steps counted outside confirmed walking marked *uncertain*, cadence while walking, detector confidence, motion context | live buffer or any session |
+| **Sleep (estimate)** | offline analysis of a recorded session ≥ 1 h: sleep/wake timeline, per-hour sleep, total sleep time, WASO, awakenings, duration trend over recent nights, data-quality panel; every value badged as an estimate, explicit empty states (no stages, not clinical) | recorded sessions only |
 | **Sessions** | every recording and replay with source, duration, status, firmware, pipeline, rate, loss, gaps, errors, size; full metadata; export raw CSV, metadata JSON, session summary JSON (metadata + integrity + quality fractions + `session_report` + episodes) | disk |
 | **Data & research** | deterministic replay job, dataset generation job, job log, pipeline configuration (read-only), baseline vs current benchmark table | disk + CLI |
 

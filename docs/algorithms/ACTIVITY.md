@@ -71,6 +71,34 @@ Synthetic: walking error ≈ −7 %, false steps 4–12 / min. Real `walking_60s
 settings — **failed acceptance**. Enable with `RuntimeEngine(step_counter="periodic")` for
 research only.
 
+## Opt-in gated counter (algorithm 3.0-dev) — not the default
+
+[`activity/step_counter_v2.py`](../../parkinsense/activity/step_counter_v2.py), `RuntimeEngine(step_counter="gated")`.
+Rule for becoming the default: [STEP_ACCEPTANCE.md](STEP_ACCEPTANCE.md). Decision: [ADR-0012](../decisions/0012-gated-step-counter-opt-in.md).
+
+Let m[n] = |a[n]| and y[n] its causal band-pass (4th-order Butterworth, 0.5–3.5 Hz). Running power
+P[n] = P[n−1] + α(y[n]² − P[n−1]), τ = 2 s.
+
+**Candidate steps.** n−1 is a candidate if y[n−1] > y[n−2], y[n−1] ≥ y[n] and y[n−1] > max(0.03 g, 0.5√P),
+with t ≥ 0.28 s after the previous candidate. Candidates are stored, not counted.
+
+**Walking gate** (every 0.5 s, window W = last 4 s of y, centred ỹ = y − ȳ). For lag τ in [0.30, 1.40] s:
+
+  r(τ) = Σᵢ ỹ[i] ỹ[i+τ] / √( Σᵢ ỹ[i]² · Σᵢ ỹ[i+τ]² ),  i over the overlap.
+
+The gate passes if max_τ r(τ) ≥ ρ = 0.65 **and** RMS(y over 2 s) ≥ 0.12 g. A pass keeps the gate
+open for 2 s. When it opens, candidates of the previous 3 s are counted with their true times; while
+open, new candidates count at once. The runtime motion gate (REST never counts; tremor withholds
+ACTIVE) is unchanged. Autocorrelation is computed with an FFT of length 2·|W|.
+
+**Thresholds** ρ and the RMS floor were chosen on the Clemson recordings by a participant-independent
+2-fold cross-validation over {0.6, 0.65, 0.7} x {0.08, 0.12} g (plus a 3.2 s-window variant that did not help);
+see `benchmarks/steps_select.py`. The shipped constants (0.65, 0.12) are the best on all participants, so any
+all-participant figure is in-sample; held-out figures are in the validation report.
+
+**Latency.** Up to ~2 s: the first steps of a bout are credited when the gate opens. Totals are correct after
+the bout is confirmed; the live step counter therefore lags a walking start by about two seconds.
+
 ## Limitations
 
 Single wrist sensor: arm movement without walking produces candidate peaks; walking with a

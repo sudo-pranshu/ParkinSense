@@ -32,3 +32,4 @@ datasets/*/
 .pytest_cache/
 .run/
 logs/
+data/external/

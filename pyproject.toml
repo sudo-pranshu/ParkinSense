@@ -25,6 +25,7 @@ dev = ["pytest>=7.4", "flake8>=6"]
 parkinsense-live = "parkinsense.runtime.app:main"
 parkinsense-replay = "parkinsense.replay.replay:main"
 parkinsense-dataset = "parkinsense.datasets.builder:main"
+parkinsense-sleep = "parkinsense.sleep.api:main"
 
 [tool.setuptools.packages.find]
 include = ["parkinsense*"]
@@ -34,5 +35,6 @@ include = ["parkinsense*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = ["hardware: requires a physical ParkinSense device (skipped in CI)"]
 addopts = "-m 'not hardware'"
