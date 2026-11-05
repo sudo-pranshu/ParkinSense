@@ -13,6 +13,10 @@ Every page states what is validated and what is not.
 | [Architecture](architecture/ARCHITECTURE.md) | layers, data flow, module map, design principles |
 | [Validation results](validation/RESULTS.md) | baseline vs current numbers and what they do (not) mean |
 | [Sleep & step validation](validation/SLEEP_STEP_VALIDATION.md) | public-dataset results for sleep and steps (not ParkinSense hardware) |
+| [Project state](PROJECT_STATE.md) | one-page handover: what is done, blocked, next |
+| [Phase 8 final report](audit/PHASE_8_FINAL_REPORT.md) | wear-aware acquisition: audit, decisions, evidence classes, limits |
+| [Phase 8 validation plan](validation/PHASE_8_VALIDATION_PLAN.md) | wear-aware acquisition: what was tested, what is pending hardware (W0–W8) |
+| [Benchmark registry](validation/BENCHMARK_REGISTRY.md) | every algorithm: dataset, split, metrics, status, reproduction |
 
 ## Reference
 
@@ -33,6 +37,10 @@ Every page states what is validated and what is not.
 | [Motion & tremor](algorithms/MOTION_AND_TREMOR.md) | Welch PSD, peak interpolation, amplitude, SNR, harmonic rejection, motion context, evidence, HMM |
 | [PPG](algorithms/PPG.md) | sampling contract, finger detection, SQI, HR, motion coupling, HRV, SpO₂ estimate |
 | [Activity](algorithms/ACTIVITY.md) | default step counter, experimental periodic and gated counters, [acceptance rule](algorithms/STEP_ACCEPTANCE.md) |
+| [Wear-aware acquisition](architecture/WEAR_AWARE_ACQUISITION.md) | wear state machine, gate analysis, hardware verdict, power design |
+| [Open-source review](research/OPEN_SOURCE_WEARABLE_REVIEW.md) | register of projects with verified licences and decisions |
+| [Dataset register](datasets/DATASET_REGISTER.md) | public datasets: access, licence, content, status |
+| [Power measurement](hardware/POWER_MEASUREMENT.md) | PPK2 procedure; results log (empty) |
 | [Sleep](algorithms/SLEEP.md) | movement-derived sleep/wake estimate: features, classifier, night summary, limits |
 | [Biomarkers](biomarkers/BIOMARKERS.md) | every metric's definition and status, aggregates, personal baselines, feasibility of the rest |
 

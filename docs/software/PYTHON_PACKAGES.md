@@ -55,7 +55,7 @@ only to show the spectrum of an already-recorded window.
 
 **Responsibility:** constants shared by more than one module; version strings; shared enums.
 **Public:** `PIPELINE_VERSION="3.0.0"`, `CAPTURE_SCHEMA_VERSION="3"`, `TREMOR_ALGORITHM_VERSION`,
-`STEP_COUNTER_VERSION`, `PPG_VERSION`, `SAMPLE_RATE_HZ=104.0`, `WINDOW_SAMPLES=416`,
+`STEP_ALGORITHM_VERSIONS` (`STEP_COUNTER_VERSION` is a deprecated alias of the default's), `METADATA_REVISION`, `step_algorithm_version_of()`, `PPG_VERSION`, `SAMPLE_RATE_HZ=104.0`, `WINDOW_SAMPLES=416`,
 `ANALYSIS_HOP_SAMPLES=52`, `PPG_SLOT_RATE_HZ`, `PPG_WINDOW_SECONDS=10`, `RATE_WARN_FRACTION=0.02`,
 `RATE_INVALID_FRACTION=0.05`, `MAX_GAP_BEFORE_RESET_S=0.5`, `TREMOR_BAND_HZ=(3.5, 7.5)`,
 `ARM_MOVEMENT_BAND_HZ=(0.5, 3.0)`, `ANALYSIS_BAND_HZ=(0.5, 15.0)`, `MotionState`, `Quality`.

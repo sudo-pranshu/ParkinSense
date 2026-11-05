@@ -6,11 +6,11 @@ Tests: [`tests/unit/test_activity_and_splits.py`](../../tests/unit/test_activity
 `test_no_steps_during_rest_tremor`, `test_steps_are_per_sample_not_forward_filled`.
 Decision: [ADR-0009](../decisions/0009-step-counter-acceptance.md).
 
-> **Known discrepancy.** `config.STEP_COUNTER_VERSION` is `"2.0"`, but the default algorithm is
-> the v1 detector (v1.1). Recordings made with pipeline 3.0.0 therefore carry an incorrect step
-> counter version in `metadata.json` and the capture. Reported in
-> [the documentation audit](../audit/DOCUMENTATION_AUDIT_REPORT.md); not changed in this
-> documentation-only pass.
+> **Version label (corrected in Phase 8).** Until Phase 8, `config.STEP_COUNTER_VERSION` read `"2.0"` and was
+> written into every recording although the default algorithm is the v1 detector (v1.1). New recordings now carry
+> the version of the algorithm that actually ran (`config.STEP_ALGORITHM_VERSIONS`), `metadata.json` has
+> `metadata_revision: 2`, and `config.step_algorithm_version_of()` interprets older recordings (legacy `2.0`
+> means default v1.1). No capture column changed. [ADR-0013](../decisions/0013-step-version-label-correction.md).
 
 ## Default counter (per sample, 104 Hz)
 

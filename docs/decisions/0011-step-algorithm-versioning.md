@@ -10,7 +10,7 @@ Sleep and step algorithms now evolve independently of the pipeline, firmware, pr
 
 ## Decision
 
-* `STEP_COUNTER_VERSION` is **not changed** (historical field, left as recorded).
+* `STEP_COUNTER_VERSION` was **not changed** in Phase 7 (historical field); Phase 8 corrected it additively, see [ADR-0013](0013-step-version-label-correction.md).
 * New, additive constants: `STEP_ALGORITHM_VERSIONS = {"default": "1.1", "periodic": "2.0", "gated": "3.0-dev"}`,
   `SLEEP_ALGORITHM_VERSION`, `SLEEP_EPOCH_SCHEMA_VERSION`.
 * `RuntimeEngine(step_counter="default" | "periodic" | "gated")`; unknown names raise `ValueError` (previously any
@@ -22,5 +22,4 @@ Sleep and step algorithms now evolve independently of the pipeline, firmware, pr
 ## Consequences
 
 Old recordings remain interpretable; new ones say which step algorithm produced them. Analysis outputs
-(`sleep` reports, benchmark JSON) carry their own version fields. Open question for the owner: whether to correct
-`STEP_COUNTER_VERSION` itself; not done without approval.
+(`sleep` reports, benchmark JSON) carry their own version fields. The label itself was corrected in Phase 8 (ADR-0013).

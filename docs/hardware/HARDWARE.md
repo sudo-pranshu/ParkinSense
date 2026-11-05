@@ -62,9 +62,18 @@ stops it. Typical values recorded in the v4 source: no finger IR ≈ 1 600, fing
 v5 keeps this behaviour by default (`REQUIRE_FINGER_FOR_STREAMING = true`). Consequence: no
 IMU data — and therefore no tremor or step data — without PPG contact.
 
+## Wear detection capability (Phase 8)
+
+The current hardware has **no** skin-contact, proximity or temperature sensor, and the LSM6DS3 alone cannot separate a
+worn, still wrist from a device on a table (public-data evidence in the architecture document). The MAX30102 is a
+finger sensor; its behaviour on the wrist is unmeasured. Verdict, options and costs:
+[wear-aware acquisition](../architecture/WEAR_AWARE_ACQUISITION.md#2-hardware-verdict-can-the-current-hardware-detect-wear-reliably).
+The open-enclosure photograph appears to show an ESP32-S3-labelled XIAO board while this file lists the nRF52840 Sense;
+the board must be read off the prototype (test W0) and this file corrected.
+
 ## Power
 
 No current measurements exist in the repository for any firmware. Earlier figures (~7 mA
 active, µA sleep, ~100 h) are not supported by the v4 code, which has no sleep or
 power-management calls (audit A-P0-4). v5 yields to the RTOS between samples; its effect is
-unmeasured. Procedure: H5 in [hardware tests](../validation/HARDWARE_TEST_PROCEDURE.md).
+unmeasured. Procedure: H5 in [hardware tests](../validation/HARDWARE_TEST_PROCEDURE.md) and the full PPK2 guide [POWER_MEASUREMENT](POWER_MEASUREMENT.md).

@@ -127,6 +127,15 @@ RATE=104 IR=108734 SEQ=52 BLE=1
 
 v4 is built the same way from `firmware/legacy/ble_stream_v4/`.
 
+## What `REQUIRE_FINGER_FOR_STREAMING` gates, and the two build profiles
+
+With the constant `true` (shipped), IMU reads, packet construction/`seq`/timestamps and BLE `notify()` run only while
+a finger holds IR above 50 000 for 3 polls; PPG FIFO polling and advertising always run. With `false`, streaming starts
+at boot and the finger logic is inert, so IMU and PPG are independent and IR still travels in every sample. Full table,
+hardware verdict and wear design: [wear-aware acquisition](../architecture/WEAR_AWARE_ACQUISITION.md); decision:
+[ADR-0014](../decisions/0014-wear-aware-acquisition.md). Phase 8 made **no firmware change**; profile B (`false`) is
+type-checked but has not been flashed. There is no write characteristic, so the host cannot control the device.
+
 ## Tests that run without hardware
 
 ```bash
@@ -139,4 +148,4 @@ g++ -std=c++17 -fsyntax-only -I firmware/tests/stubs -I firmware/parkinsense_wea
 The first checks struct sizes, scaling, saturation, clip flags and scheduler behaviour
 (including `micros()` wrap). The second type-checks the sketch against minimal API stubs in
 `firmware/tests/stubs/`; it does **not** prove the sketch compiles against the real libraries.
-Both run in CI.
+Both run in CI. The same type-check with `REQUIRE_FINGER_FOR_STREAMING = false` (profile B) was run in Phase 8 on an edited copy of `config.h`.

@@ -23,6 +23,13 @@ After each session, inspect `metadata.json` and run
 | H10 | Wrap | 75-min session | `timestamp_wraps` = 1, no `window_resets` from the wrap |
 | H11 | Disconnect | Walk out of range for 30 s, return | new session directory; previous `metadata.json` status COMPLETE |
 
+## Wear and acquisition tests (Phase 8)
+
+Tests W0–W8 (board identification, bench noise floor, worn-still distribution, removal, re-wear, profile B contract,
+wrist optical signal, sensor independence, overnight recording) with pre-fixed pass criteria are in
+[PHASE_8_VALIDATION_PLAN](PHASE_8_VALIDATION_PLAN.md#3-physical-hardware-tests--all-pending). Power: the PPK2 scenarios S1–S7 in
+[POWER_MEASUREMENT](../hardware/POWER_MEASUREMENT.md). All NOT RUN.
+
 ## Reference-device validation (after H0–H6 pass)
 
 | Measurement | Reference | Protocol | Metrics to report |

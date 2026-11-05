@@ -24,3 +24,21 @@ only optionally by `benchmarks/sleep_bench.py` for the random-forest reference a
 
 A note on an earlier docstring: `step_counter_periodic.py` cites "an MIT-licensed reference in the `walking` R package";
 the MIT licence verified here is that of Shimmer's `Verisense-Toolbox`. The `walking` package was not checked.
+
+## Phase 8 additions (open-source wearable review, wear monitor)
+
+No third-party code was copied or adapted in Phase 8. Licences were read from LICENSE files of shallow clones made for
+inspection only. Full register: [OPEN_SOURCE_WEARABLE_REVIEW](OPEN_SOURCE_WEARABLE_REVIEW.md).
+
+| Source | Licence (as read) | Use here |
+|---|---|---|
+| `InfiniTimeOrg/InfiniTime` | GPL-3.0 | architecture patterns read; **no code reused** (would make the MIT firmware GPL-3.0) |
+| `the-momentum/open-wearables` | MIT | data-model ideas only |
+| `OpenEarable/open-earable` | MIT | patterns only |
+| `OpenEarable/open-earable-2` | custom `LicenseRef-PCFT` / `LicenseRef-Nordic-5-Clause` text | reference only |
+| `biomarkersParkinson/pdathome_tremor` (MATLAB), `biomarkersParkinson/paradigma` (Python) | Apache-2.0 | read for the Phase 9 benchmark; any future adaptation needs NOTICE and a `third_party/` copy |
+| `wadpac/GGIR` | Apache-2.0 | non-wear and sleep methodology (re-implemented from papers in Phase 7) |
+| `OxWearables/ssl-wearables` | Oxford Academic Use Licence | excluded |
+| Walch, Karas | ODC-By 1.0 / ODbL 1.0 | wear benchmark uses the same downloaded copies as Phase 7 |
+
+Dependencies added: none.

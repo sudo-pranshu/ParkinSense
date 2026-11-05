@@ -36,6 +36,8 @@ useful than its current state.
 | [0010](0010-sleep-subsystem.md) | Sleep subsystem: offline, accelerometer-only, logistic regression | Accepted |
 | [0011](0011-step-algorithm-versioning.md) | Explicit per-algorithm versions; selectable step algorithm | Accepted |
 | [0012](0012-gated-step-counter-opt-in.md) | Gated step counter stays opt-in | Accepted |
+| [0013](0013-step-version-label-correction.md) | Correct the step-counter version label additively | Accepted |
+| [0014](0014-wear-aware-acquisition.md) | Wear inference on the host; no firmware or protocol change in Phase 8 | Accepted |
 
 ## Template
 

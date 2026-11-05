@@ -67,4 +67,4 @@ why and how it was validated.
 5. Reduce arm-movement false steps with labelled walking data.
 6. Measure power (H5).
 7. Bring the mobile app into version control and align it with the v3 metrics and quality states.
-8. Fix the `STEP_COUNTER_VERSION` provenance value (see [audit](../audit/DOCUMENTATION_AUDIT_REPORT.md)).
+8. ~~Fix the `STEP_COUNTER_VERSION` provenance value~~ — done in Phase 8 ([ADR-0013](../decisions/0013-step-version-label-correction.md)).

@@ -234,10 +234,11 @@ decision records · references · reports.
   subjects, not validated on ParkinSense hardware or in Parkinson's disease, and impossible overnight with the current firmware
   ([hardware limits](docs/hardware/SLEEP_STEP_HARDWARE_LIMITS.md)).
 * Firmware ≤ v4: PPG effectively 10 Hz (no HRV), gyro wraps above 250 dps.
-* Streaming requires a finger on the PPG sensor, which rules out tremor-only and overnight use.
+* Streaming requires a finger on the PPG sensor (profile A, the shipped default), which rules out tremor-only and overnight use; profile B (`REQUIRE_FINGER_FOR_STREAMING = false`) removes that but is unflashed. The hardware has no skin-contact sensor, so wear/removal is only *inferred* ([wear-aware acquisition](docs/architecture/WEAR_AWARE_ACQUISITION.md)).
 * No power measurements exist for any firmware.
-* `STEP_COUNTER_VERSION` in recordings reads `2.0` although the default counter is v1.1
-  (known provenance bug, see [audit](docs/audit/DOCUMENTATION_AUDIT_REPORT.md)).
+* Recordings made before Phase 8 label the default step counter `2.0` although it is v1.1; new recordings are
+  labelled correctly and old ones are interpreted by `config.step_algorithm_version_of`
+  ([ADR-0013](docs/decisions/0013-step-version-label-correction.md)).
 
 ## Contributing
 

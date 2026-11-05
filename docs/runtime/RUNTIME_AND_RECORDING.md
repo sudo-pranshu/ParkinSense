@@ -192,7 +192,7 @@ JSON files are written atomically (temp file + `os.replace`). The live app refre
 }
 ```
 
-`step_counter_version` reads `2.0` although the default counter is v1.1 — see the known discrepancy in [activity](../algorithms/ACTIVITY.md).
+`step_counter_version` names the step algorithm that ran (`1.1` default, `2.0` periodic, `3.0-dev` gated) since Phase 8; `metadata.json` carries `metadata_revision: 2` for such recordings. Earlier recordings carry the legacy label `2.0` for the default counter; interpret them with `parkinsense.config.step_algorithm_version_of` ([ADR-0013](../decisions/0013-step-version-label-correction.md)). With the opt-in wear monitor, `metadata.json` also holds a `wear` block ([architecture](../architecture/WEAR_AWARE_ACQUISITION.md)).
 
 ### capture.csv — schema v3 (79 columns)
 
@@ -251,7 +251,7 @@ working); 53–79 are appended. Time base per [ADR-0003](../decisions/0003-captu
 | 48 | `flags` | per packet | packet flags (v2) |
 | 49 | `pipeline_version` | per session | `3.0.0` |
 | 50 | `firmware_version` | per session | from DIS (v5) or `--firmware-version` |
-| 51 | `step_counter_version` | per session | see known discrepancy in ACTIVITY.md |
+| 51 | `step_counter_version` | per session | algorithm version that ran (`1.1`/`2.0`/`3.0-dev`); legacy recordings: `2.0` = default v1.1, see ADR-0013 |
 | 52 | `ppg_version` | per session | `2.0` |
 | 53 | `session_id` | per session | 12-hex session identifier |
 | 54 | `host_monotonic` | per sample | host `time.monotonic()` at packet arrival, s |

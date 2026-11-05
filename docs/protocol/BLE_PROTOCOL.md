@@ -172,6 +172,12 @@ so no analysis window spans a discontinuity. All counters are written to every
 | Measured rate > 5 % off | `rate_status = INVALID`; tremor quality `DATA_GAP`, HR quality `RATE_INVALID` |
 | v1 sample near full scale | `possibly_clipped = true` on the row; windows with > 2 % such samples → tremor quality `SENSOR_FAULT` |
 
+## Wear state is not in the protocol
+
+Phase 8 added **no** protocol field and left bit 7 of `flags` reserved ([ADR-0014](../decisions/0014-wear-aware-acquisition.md)).
+Wear state is inferred on the host from motion, the `ir` field and the `IMU_FAULT` / `PPG_FAULT` flags. A device-side wear
+state would require protocol v3 under the rules below.
+
 ## Compatibility rules
 
 1. The 208-byte framing and field order never change within a protocol major version.
