@@ -15,6 +15,9 @@ Every page states what is validated and what is not.
 | [Sleep & step validation](validation/SLEEP_STEP_VALIDATION.md) | public-dataset results for sleep and steps (not ParkinSense hardware) |
 | [Project state](PROJECT_STATE.md) | one-page handover: what is done, blocked, next |
 | [Phase 8 final report](audit/PHASE_8_FINAL_REPORT.md) | wear-aware acquisition: audit, decisions, evidence classes, limits |
+| [Hardware session checklist](validation/HARDWARE_SESSION_CHECKLIST.md) | first physical session: W0, H0–H3, W1, W2, PPK2, with setup, commands, pass criteria, evidence |
+| [Phase 9 tremor baseline plan](research/PHASE_9_TREMOR_BASELINE_PLAN.md) | ParaDigMa/PD@Home reproduction: access status, pre-registered criteria |
+| [Phase 9 FoG plan](research/PHASE_9_FOG_PLAN.md) | Daphnet benchmark: access, caveats, pre-registered criteria |
 | [Phase 8 validation plan](validation/PHASE_8_VALIDATION_PLAN.md) | wear-aware acquisition: what was tested, what is pending hardware (W0–W8) |
 | [Benchmark registry](validation/BENCHMARK_REGISTRY.md) | every algorithm: dataset, split, metrics, status, reproduction |
 

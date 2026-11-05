@@ -12,9 +12,9 @@ acceptance criteria are met, not when code exists.
 | Branch / CI | `transform/engineering-overhaul`; 139 tests pass locally (1 hardware test deselected by design) |
 | Production algorithms | tremor v3 (PSD + HMM), steps v1.1 default, sleep 1.0 (offline), PPG 2.0 — unchanged |
 | Experimental | gated step counter (opt-in, fails 2 of 7 criteria); wear monitor 1.0 (opt-in, provisional thresholds) |
-| Firmware | 5.0.0 never compiled for target, flashed or measured; v4 is last hardware-verified; **no firmware change in Phase 8** |
-| **Phase 8** | **Software, documentation and public-data evaluation done. NOT complete:** acceptance needs hardware evidence (W0–W8, H1–H3, H5, PPK2 S1–S7), all NOT RUN |
-| Phase 9 | Research infrastructure only so far: [dataset register](datasets/DATASET_REGISTER.md), [benchmark registry](validation/BENCHMARK_REGISTRY.md), [open-source review](research/OPEN_SOURCE_WEARABLE_REVIEW.md). No algorithm work started |
+| Firmware | no firmware change in Phase 8. Owner reports (2026-11-06) the updated firmware, dashboard and system tested on themselves and working; no version/profile, IDs, durations, logs or measurements attached, so no documented test counts as run. v4 remains the last firmware with documented hardware verification |
+| **Phase 8** | **Software, documentation and public-data evaluation done. NOT complete:** acceptance needs recorded hardware evidence (W0–W8, H1–H3, H5, PPK2 S1–S7): all documented tests NOT RUN; owner-reported informal testing noted; first session prepared: [checklist](validation/HARDWARE_SESSION_CHECKLIST.md) |
+| Phase 9 | Task 1 prepared, not run: [tremor baseline plan](research/PHASE_9_TREMOR_BASELINE_PLAN.md) and [FoG plan](research/PHASE_9_FOG_PLAN.md) with pre-registered criteria; PD@Home access/licence unconfirmed (owner action), Daphnet to be downloaded by the owner. Research infrastructure: [dataset register](datasets/DATASET_REGISTER.md), [benchmark registry](validation/BENCHMARK_REGISTRY.md), [open-source review](research/OPEN_SOURCE_WEARABLE_REVIEW.md). No algorithm work started |
 
 ## Blocking the next milestones
 
@@ -32,9 +32,10 @@ ADR-0013 (step label corrected additively), ADR-0014 (wear inference on the host
 
 ## Next actions, in order
 
-1. Hardware: W0, W1, W2, W5, H1–H3 (one session with the board).
-2. Phase 9 start: tremor baseline vs ParaDigMa (Apache-2.0) on PD@Home once access is confirmed, with acceptance criteria
-   written **before** any held-out run; FoG baseline on Daphnet (CC BY 4.0, open).
+1. Hardware: first session per the [checklist](validation/HARDWARE_SESSION_CHECKLIST.md) (W0, H0–H3/H9, W1, W2, PPK2 subset).
+2. Phase 9: owner confirms PD@Home access/licence and downloads Daphnet; then ingestion manifest, ParaDigMa LOSO
+   reproduction, ParkinSense v3 as-is and the Daphnet baseline, under the criteria already fixed in
+   [tremor](research/PHASE_9_TREMOR_BASELINE_PLAN.md) and [FoG](research/PHASE_9_FOG_PLAN.md) plans.
 3. Keep experimental code opt-in until criteria pass.
 
 Details: [Phase 8 final report](audit/PHASE_8_FINAL_REPORT.md).

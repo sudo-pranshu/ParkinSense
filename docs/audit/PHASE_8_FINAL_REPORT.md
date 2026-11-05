@@ -10,7 +10,7 @@ Branch `transform/engineering-overhaul`. Date 2026-11-06. Authoring: Pranshu Kum
 | Automated-test verified | pytest (see §8), host firmware `g++` tests and type-checks |
 | Host-simulated | synthetic wear/removal/fault scenarios; simulated BLE packets |
 | Research-dataset evaluated | false-removal rates on Walch and Karas (other devices) |
-| **Physically hardware-tested** | **nothing** — no board is reachable from this session |
+| **Physically hardware-tested** | **no documented test.** Update 2026-11-06: the owner reports having tested the updated firmware, dashboard and system on themselves and that it worked; no version/profile, test IDs, durations, logs or measurements were provided, so this is owner-reported evidence only and every individually documented test stays NOT RUN ([plan §3a](../validation/PHASE_8_VALIDATION_PLAN.md#3a-owner-reported-physical-testing-2026-11-06)). The board is stated to be the Seeed XIAO nRF52840 |
 | **Externally validated / clinically validated** | **nothing** |
 
 ## 1. Initial audit

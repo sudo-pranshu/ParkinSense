@@ -1,6 +1,8 @@
 # Hardware validation procedure (firmware 5.0.0 / protocol v2)
 
-None of these tests has been performed. Record results in the table at the bottom, with date,
+No test below has a recorded result. The owner reports informal physical testing of the updated system working
+([PHASE_8_VALIDATION_PLAN §3a](PHASE_8_VALIDATION_PLAN.md#3a-owner-reported-physical-testing-2026-11-06)), which is not
+attached to any test ID. Session plan: [HARDWARE_SESSION_CHECKLIST](HARDWARE_SESSION_CHECKLIST.md). Record results in the table at the bottom, with date,
 board serial and host OS. Never mark a test passed without running it.
 
 Setup: XIAO nRF52840 Sense with LSM6DS3 + MAX30102 wired as in v4. Build instructions:
@@ -27,7 +29,7 @@ After each session, inspect `metadata.json` and run
 
 Tests W0–W8 (board identification, bench noise floor, worn-still distribution, removal, re-wear, profile B contract,
 wrist optical signal, sensor independence, overnight recording) with pre-fixed pass criteria are in
-[PHASE_8_VALIDATION_PLAN](PHASE_8_VALIDATION_PLAN.md#3-physical-hardware-tests--all-pending). Power: the PPK2 scenarios S1–S7 in
+[PHASE_8_VALIDATION_PLAN](PHASE_8_VALIDATION_PLAN.md#3-physical-hardware-tests--documented-tests-all-pending). Power: the PPK2 scenarios S1–S7 in
 [POWER_MEASUREMENT](../hardware/POWER_MEASUREMENT.md). All NOT RUN.
 
 ## Reference-device validation (after H0–H6 pass)
