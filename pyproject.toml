@@ -35,5 +35,6 @@ include = ["parkinsense*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = ["hardware: requires a physical ParkinSense device (skipped in CI)"]
 addopts = "-m 'not hardware'"

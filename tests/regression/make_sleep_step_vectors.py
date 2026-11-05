@@ -1,7 +1,7 @@
 """
 Generate cross-platform parity vectors for the sleep and step algorithms.
 
-    python -m tests.regression.make_sleep_step_vectors
+    python tests/regression/make_sleep_step_vectors.py
 
 The Python implementation is the reference. Android / iOS ports must reproduce `expected` from `input`
 within the stated tolerances (docs/software/SLEEP_STEP_MOBILE_SPEC.md). Inputs are synthetic and exist only to

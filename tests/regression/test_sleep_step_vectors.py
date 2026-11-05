@@ -1,11 +1,13 @@
 """Parity vectors: the Python reference must reproduce the committed vectors (mobile ports test against the same file)."""
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from tests.regression import make_sleep_step_vectors as G  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent))
+import make_sleep_step_vectors as G  # noqa: E402
 
 V = json.loads((Path(__file__).parent / "sleep_step_vectors.json").read_text())
 
