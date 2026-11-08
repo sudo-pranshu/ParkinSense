@@ -69,7 +69,7 @@ to a Python runtime. The runtime:
 | SpO₂ | **uncalibrated estimate** | no reference oximeter data |
 | Steps / cadence | working, known false steps during arm movement | −9.7 % walking error (synthetic); 69 vs ≈ 86 on one real recording |
 | Datasets with leakage-safe splits | working | unit tests |
-| Firmware 5.0.0 / protocol v2 | **written and host-tested, not yet flashed** | [hardware test procedure](docs/validation/HARDWARE_TEST_PROCEDURE.md) |
+| Firmware 5.0.0 / protocol v2 | **host-tested; owner reports flashed and working (2026-11-08), no log, not yet measured** | [hardware test procedure](docs/validation/HARDWARE_TEST_PROCEDURE.md) |
 | Mobile companion app | not in this repository | — |
 
 Before/after numbers and how they were obtained: [validation results](docs/validation/RESULTS.md).

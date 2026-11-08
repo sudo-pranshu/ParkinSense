@@ -74,7 +74,7 @@ def fig_architecture():
     ax.text(0.80, 0.975, "Consumers", fontsize=7, fontweight="bold", color=GREY)
     box(ax, 0.01, 0.74, 0.17, 0.12, "LSM6DS3 IMU\n104 Hz accel + gyro", "#DCEBF7")
     box(ax, 0.01, 0.55, 0.17, 0.12, "MAX30102\nIR + RED, 100 SPS FIFO", "#F8E3E3")
-    box(ax, 0.01, 0.30, 0.17, 0.17, "XIAO firmware\nacquire, timestamp, pack\nv4: hardware-verified\n5.0.0: host-tested only", "#EEEEEE")
+    box(ax, 0.01, 0.30, 0.17, 0.17, "XIAO firmware\nacquire, timestamp, pack\nv4: hardware-verified\n5.0.0: flashed, no log", "#EEEEEE")
     arrow(ax, (0.095, 0.74), (0.095, 0.47))
     arrow(ax, (0.095, 0.55), (0.095, 0.47))
     box(ax, 0.01, 0.07, 0.17, 0.14, "BLE 5 notify, 208 B\n8 B header + 10 x 20 B\n≈10.4 packets/s", "#FFF4D6")

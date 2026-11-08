@@ -43,10 +43,10 @@ Acceptance criteria fixed **before** the default was set, and what happened:
 E3 and E4 are why the default is "provisional". A new independent worn-night set (CAPTURE-24 is a candidate, not
 downloadable from this environment) is needed for E4; ParkinSense bench recordings for E3.
 
-## 3a. Owner-reported physical testing (2026-11-06)
+## 3a. Owner-reported physical testing (2026-11-06, 2026-11-08)
 
 The owner reports having physically tested the updated ParkinSense firmware, dashboard and overall system on
-themselves, and that everything worked perfectly. Board: Seeed Studio XIAO nRF52840 (owner statement).
+themselves, and that everything worked perfectly. On 2026-11-08 the owner confirmed that firmware 5.0.0 is flashed and working and that the new dashboard works with it. Board: Seeed Studio XIAO nRF52840 (owner statement).
 
 What this is: a report by the person who built the device. What it is not, because nothing more was provided:
 it names no firmware version or build profile (A/B), no test IDs, no durations, no packet-loss or rate figures, no battery

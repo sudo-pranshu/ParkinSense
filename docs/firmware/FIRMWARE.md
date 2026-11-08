@@ -2,7 +2,7 @@
 
 | Build | Path | Protocol | Status |
 |---|---|---|---|
-| **parkinsense_wearable 5.0.0** | `firmware/parkinsense_wearable/` | v2 | written, host-tested, type-checked; **not compiled with the nRF52 core, not flashed, not measured** |
+| **parkinsense_wearable 5.0.0** | `firmware/parkinsense_wearable/` | v2 | written, host-tested, type-checked; **owner reports (2026-11-08) it is flashed and working; no log, so not measured** |
 | ble_stream_v4 | `firmware/legacy/ble_stream_v4/` | v1 | last hardware-verified build; use it for data collection until v5 passes H0–H6 |
 | older sketches | `firmware/legacy/*` | v1 / none | historical (v1 stream, v3, IMU-only, OLED, dataset recorder, modular v3) |
 
@@ -134,7 +134,7 @@ a finger holds IR above 50 000 for 3 polls; PPG FIFO polling and advertising alw
 at boot and the finger logic is inert, so IMU and PPG are independent and IR still travels in every sample. Full table,
 hardware verdict and wear design: [wear-aware acquisition](../architecture/WEAR_AWARE_ACQUISITION.md); decision:
 [ADR-0014](../decisions/0014-wear-aware-acquisition.md). Phase 8 made **no firmware change**; profile B (`false`) is
-type-checked but has not been flashed. There is no write characteristic, so the host cannot control the device.
+type-checked; which profile is flashed is not recorded. There is no write characteristic, so the host cannot control the device.
 
 ## Tests that run without hardware
 

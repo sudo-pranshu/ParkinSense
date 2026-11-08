@@ -1,7 +1,7 @@
 # Implementation status and evidence matrix
 
 Evidence classes: tests, synthetic, public data (other devices), ParkinSense hardware, clinical. No clinical evidence exists. Board: Seeed XIAO nRF52840 Sense.
-Hardware tests H0–H11, W0–W8 and PPK2 S1–S7 are NOT RUN. An owner-reported informal test (2026-11-06) is not counted as evidence.
+Hardware tests H0–H11, W0–W8 and PPK2 S1–S7 are NOT RUN. An owner report (2026-11-06, 2026-11-08) that firmware 5.0.0 is flashed and working with the new dashboard is not counted as evidence: no log or measurement was kept.
 
 Status: Implemented, Bench-tested, Partial, In development, Planned, Future.
 

@@ -106,7 +106,7 @@ def fig_acq():
     ax.axis("off")
     box(ax, 0.0, 0.70, 0.12, 0.17, "LSM6DS3\nI²C 0x6A\n104 Hz", C["imu"])
     box(ax, 0.0, 0.44, 0.12, 0.17, "MAX30102\nI²C\nIR + RED FIFO", C["ppg"])
-    box(ax, 0.18, 0.44, 0.20, 0.43, "XIAO nRF52840\nSense firmware:\n9 615 µs sample timer,\ntimestamp, pack 10\nsamples, BLE notify\nv4: hardware-verified\n5.0.0: host-tested", C["gen"], fs=5.2)
+    box(ax, 0.18, 0.44, 0.20, 0.43, "XIAO nRF52840\nSense firmware:\n9 615 µs sample timer,\ntimestamp, pack 10\nsamples, BLE notify\nv4: hardware-verified\n5.0.0: flashed, no log", C["gen"], fs=5.2)
     box(ax, 0.44, 0.55, 0.14, 0.22, "BLE 5 notify\n208 B packets\n≈ 10.4 /s", C["ble"], fs=5.2)
     box(ax, 0.64, 0.44, 0.22, 0.43, "Host decoder\nversion, length, flags,\nsequence gaps,\ntimestamp unwrap,\nrate within ±5 %,\nclip and fault flags", C["gen"], fs=5.2)
     box(ax, 0.90, 0.55, 0.10, 0.22, "Runtime\nEngine", "#FFFFFF", fs=5.4)

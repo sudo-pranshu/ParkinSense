@@ -10,14 +10,14 @@ Branch `transform/engineering-overhaul`. Date 2026-11-06. Authoring: Pranshu Kum
 | Automated-test verified | pytest (see §8), host firmware `g++` tests and type-checks |
 | Host-simulated | synthetic wear/removal/fault scenarios; simulated BLE packets |
 | Research-dataset evaluated | false-removal rates on Walch and Karas (other devices) |
-| **Physically hardware-tested** | **no documented test.** Update 2026-11-06: the owner reports having tested the updated firmware, dashboard and system on themselves and that it worked; no version/profile, test IDs, durations, logs or measurements were provided, so this is owner-reported evidence only and every individually documented test stays NOT RUN ([plan §3a](../validation/PHASE_8_VALIDATION_PLAN.md#3a-owner-reported-physical-testing-2026-11-06)). The board is stated to be the Seeed XIAO nRF52840 |
+| **Physically hardware-tested** | **no documented test.** Update 2026-11-06 and 2026-11-08: the owner reports having flashed firmware 5.0.0 and tested the updated firmware, dashboard and system on themselves and that it worked; no version/profile, test IDs, durations, logs or measurements were provided, so this is owner-reported evidence only and every individually documented test stays NOT RUN ([plan §3a](../validation/PHASE_8_VALIDATION_PLAN.md#3a-owner-reported-physical-testing-2026-11-06)). The board is stated to be the Seeed XIAO nRF52840 |
 | **Externally validated / clinically validated** | **nothing** |
 
 ## 1. Initial audit
 
 * Repository state: branch `transform/engineering-overhaul`, clean, no stashes; PR #3 had already merged the branch into
   `origin/develop` (merge `edbaa1a`). `develop` was not modified by Phase 8.
-* Firmware 5.0.0: host-tested only — never compiled with the nRF52 core, flashed or measured. v4 is the last
+* Firmware 5.0.0: host-tested; the owner reports (2026-11-08) it is flashed and working, with no log or measurement. v4 is the last
   hardware-verified build.
 * `REQUIRE_FINGER_FOR_STREAMING` gates IMU reads, packet construction/`seq`/timestamps and `notify()`; not PPG polling
   or advertising. No write characteristic exists (no downlink). Table in the
@@ -117,7 +117,7 @@ no on-device low-power mode; wrist PPG unmeasured; CSV `step_counter_version = 2
 
 ## 12. Outstanding risks
 
-1. Firmware 5.0.0 has never been compiled for the target or flashed; profile B untested on a device.
+1. Firmware 5.0.0 is owner-reported flashed and working (2026-11-08) but unlogged; the profile flashed is not recorded and profile B is untested on a device.
 2. If W1 shows LSM6DS3 table noise is not clearly below worn-still noise, the stillness criterion is useless and the extra
    sensor becomes mandatory (hardware change, Phase 12 enclosure).
 3. Overnight recording is not validated; a 700 mAh pack (unverified) may not last a night in profile B (unmeasured).

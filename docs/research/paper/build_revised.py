@@ -183,15 +183,16 @@ def build(prev=None):
       "<i>signal time</i> from device timestamps (the 32-bit microsecond counter, which wraps every 71.6 min, is unwrapped), so a recording replayed at any speed reproduces the live "
       "output; the regression suite relies on this.")
     B("<b>Firmware.</b> Version 4 (protocol v1) is the last build verified on hardware. Version 5.0.0 (protocol v2) fixes defects found in audit, listed in {tab:fw}; it has been tested "
-      "on a host and type-checked against API stubs, but <i>never compiled for the target, flashed or measured</i>. A scheduler runs at 9 615 µs (104.004 Hz) and sets a discontinuity "
+      "on a host and type-checked against API stubs. The owner reports (2026-11-08) that it is flashed and streaming and that the dashboard works with it, but <i>no log was kept, so no "
+      "measurement exists</i>. A scheduler runs at 9 615 µs (104.004 Hz) and sets a discontinuity "
       "flag after more than five missed intervals. In the shipped profile the device streams only while a finger keeps the infrared level above 50 000 counts (three consecutive 250 ms "
       "polls); without finger contact there is no inertial stream. An alternative profile with independent sensors type-checks but is untested. {fig:proto} shows the sizing and housing prototype.")
-    P.table("Firmware v4 and 5.0.0 (host-tested only).", "fw", ["Item", "v4 (protocol v1)", "5.0.0 (protocol v2)"],
+    P.table("Firmware v4 and 5.0.0 (flashed per owner report; not measured).", "fw", ["Item", "v4 (protocol v1)", "5.0.0 (protocol v2)"],
             [["IMU range, rate", "±16 g, ±2000 dps (intended range never applied), 416 Hz sensor", "±4 g, ±500 dps, 104 Hz; one 12-byte burst read"],
              ["PPG to host", "10 Hz (one sample per 100 ms)", "≈ 100 Hz"],
              ["Over-range, faults", "wraps; not reported", "saturates; 7 header flags"],
              ["Packet", "208 B: 8 B header + 10 × 20 B samples", "same; sequence number added"],
-             ["Status", "<b>hardware-verified</b>", "<b>not flashed</b>"]], [0.8, 1.45, 1.5], size=6.8)
+             ["Status", "<b>hardware-verified</b>", "<b>flashed, owner-reported working; no log</b>"]], [0.8, 1.45, 1.5], size=6.8)
     P.figure(FIG / "p_architecture.png", "ParkinSense architecture. Solid arrows: data flow; dashed red arrows: gating and confidence couplings between pipelines.", "arch", wide=True, width=5.5)
     P.figure(FIG / "p_prototype.png", "Prototype: (a) assembled device worn on the wrist; (b) elastic strap, 3D-printed enclosure and electronics. The photographs record sizing and housing fit; the development board visible in (b) is a size stand-in, and the documented target is the XIAO nRF52840 Sense.", "proto", wide=True, width=4.6)
     B("<b>Protocol and integrity.</b> Both versions send 208-byte notifications (≈ 10.4 packets/s) of ten samples (ax, ay, az, gx, gy, gz, IR, red); accelerometer scale is 8192 counts/g and the "
@@ -282,7 +283,7 @@ def build(prev=None):
             [["pytest", "unit, integration, golden regression, synthetic floors", f"<b>{N_PASS} passed</b>, {N_DESEL} deselected (hardware)"],
              ["flake8", "CI rule set over package, tests, benchmarks", "0 errors"],
              ["Firmware host tests", "struct sizes, scaling, saturation, flags, scheduler with timer wrap", "OK"],
-             ["Sketch type-check", "build profiles A and B against API stubs", "OK; does not prove an nRF52 build"],
+             ["Sketch type-check", "build profiles A and B against API stubs", "OK; target build owner-reported only"],
              ["Golden replay", "6 real recordings, 104 Hz BLE and ≈ 23 Hz serial logs", "unchanged by default pipeline"],
              ["Hardware tests", "H, W and PPK2 series (Section VIII)", "<b>NOT RUN</b>"]], [0.9, 1.9, 0.95], size=6.8)
     S("Results", "results")
@@ -392,8 +393,8 @@ def build(prev=None):
             [0.78, 1.18, 1.18, 1.24, 1.0, 1.72], size=6.9, wide=True)
     S("Hardware Status, Limitations and Future Work", "disc")
     B("<b>Hardware.</b> Every documented hardware test is NOT RUN: board wiring (W0), firmware-5.0.0 streaming and sequence continuity (H1–H3), current with a power analyser (S1–S7), bench and "
-      "worn-still noise (W1–W2), removal and re-wear (W3–W4), sensor independence (W5–W7) and an overnight recording (W8). The owner reported on 2026-11-06 that updated firmware and dashboard ran on "
-      "the owner; with no firmware version, duration, loss figure or file, this raises confidence that the device streams but satisfies no pass criterion. The last documented hardware evidence "
+      "worn-still noise (W1–W2), removal and re-wear (W3–W4), sensor independence (W5–W7) and an overnight recording (W8). The owner reported on 2026-11-06 and again on 2026-11-08 that firmware 5.0.0 is flashed and working "
+      "and that the new dashboard runs with it; with no firmware version string, duration, loss figure or file, this raises confidence that the device streams but satisfies no pass criterion. The last documented hardware evidence "
       "is an 87 s firmware-v4 capture at 104.01 Hz ({tab:hwtests}). Current, battery life, packet loss over long sessions, wrist PPG and overnight operation are therefore all unmeasured.")
     P.table("Hardware tests and status (pass criteria are fixed in the validation plan).", "hwtests", ["ID", "Test", "Status"],
             [["W0", "record wiring and MAX30102 interrupt line (board: XIAO nRF52840)", "NOT RUN"],

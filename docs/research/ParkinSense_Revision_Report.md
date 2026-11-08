@@ -28,6 +28,9 @@ Older dashboard screenshots (`dashboard_normal.jpg`, `dashboard_tremor.jpg`) are
 ## Comparison section (VII)
 Two tables align ELENA, PERFORM, the Apple Watch pipeline (MM4PD and the Movement Disorder API), ParaDigMa and ParkinSense over: hardware and sensing, communication, processing architecture, algorithm, context and confidence, real-time behaviour, validation method, reported evidence, limitations. Published figures are kept apart from ParkinSense's own; no ranking or superiority claim is made. Sources added: Powers et al., Sci. Transl. Med. 2021 (doi 10.1126/scitranslmed.abd7865) and Apple's CMMovementDisorderManager documentation; ELENA (Sensors 2025, doi 10.3390/s25092763; LACCEI 2024), PERFORM (Sensors 2014), ParaDigMa were already cited.
 
+## Firmware 5.0.0 status (owner update, 2026-11-08)
+The paper, figures and repository docs now state that firmware 5.0.0 is flashed and working and that the new dashboard works with it, as reported by the owner. No log, version string, duration or measurement was kept, so this is labelled owner-reported, no hardware test (H1–H3, W, S series) is marked run, and no performance claim is added. A logged session would convert it into evidence.
+
 ## Items requested but not available (stated in the paper, not invented)
 - **Clinical-style dashboard:** none exists; the paper says the pages are engineering views.
 - **Dashboard screenshots are from the built-in simulated stream** (the SIMULATED banner is visible) and are captioned as such; no screenshot of live wearable data exists in the repository.
