@@ -68,9 +68,8 @@ The current hardware has **no** skin-contact, proximity or temperature sensor, a
 worn, still wrist from a device on a table (public-data evidence in the architecture document). The MAX30102 is a
 finger sensor; its behaviour on the wrist is unmeasured. Verdict, options and costs:
 [wear-aware acquisition](../architecture/WEAR_AWARE_ACQUISITION.md#2-hardware-verdict-can-the-current-hardware-detect-wear-reliably).
-The open-enclosure photograph appeared to show an ESP32-S3-labelled XIAO board. The owner has stated (2026-11-06) that the
-board is the Seeed Studio XIAO nRF52840, which matches this file. That is a statement, not a read-back: photographs and the
-bootloader `INFO_UF2.txt` are still to be saved under test W0 ([checklist](../validation/HARDWARE_SESSION_CHECKLIST.md)).
+The board is the Seeed Studio XIAO nRF52840 (owner statement, 2026-11-06). The prototype photographs are used for sizing and
+housing only, not to identify the board. Wiring photographs and the bootloader `INFO_UF2.txt` are still to be saved under test W0 ([checklist](../validation/HARDWARE_SESSION_CHECKLIST.md)).
 
 ## Power
 

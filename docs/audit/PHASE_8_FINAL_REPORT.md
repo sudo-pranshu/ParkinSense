@@ -23,8 +23,8 @@ Branch `transform/engineering-overhaul`. Date 2026-11-06. Authoring: Pranshu Kum
   or advertising. No write characteristic exists (no downlink). Table in the
   [architecture](../architecture/WEAR_AWARE_ACQUISITION.md).
 * Hardware: LSM6DS3 + MAX30102 (finger sensor) + battery; no skin-contact/proximity/temperature sensor; INT not wired;
-  wiring undocumented; a prototype photo appears to show an ESP32-S3-labelled board (documented BOM says nRF52840) —
-  logged as test W0.
+  wiring undocumented; the board is the Seeed XIAO nRF52840 (owner-confirmed; the prototype photo is used for sizing and
+  housing only). Read-back and wiring are logged as test W0.
 * Device bridge: the linked computer reports a Linux VM with no serial devices and no PPK2; no hardware was reachable.
 
 ## 2. Research performed
@@ -122,7 +122,7 @@ no on-device low-power mode; wrist PPG unmeasured; CSV `step_counter_version = 2
    sensor becomes mandatory (hardware change, Phase 12 enclosure).
 3. Overnight recording is not validated; a 700 mAh pack (unverified) may not last a night in profile B (unmeasured).
 4. Datasets PD@Home, MESA, WESAD, PPP have unconfirmed access/licence terms.
-5. Board identity discrepancy (nRF52840 vs ESP32-S3 in photo).
+5. Board read-back (photo, `INFO_UF2.txt`, INT wiring) not yet saved (test W0); the board is the XIAO nRF52840.
 
 ## 13. Git commits
 

@@ -18,7 +18,7 @@ acceptance criteria are met, not when code exists.
 
 ## Blocking the next milestones
 
-1. **Hardware (needs the board and a person):** W0 board identity; W1/W2 bench and worn-still noise in profile B
+1. **Hardware (needs the board and a person):** W0 wiring/INT read-back (board: XIAO nRF52840); W1/W2 bench and worn-still noise in profile B
    (`REQUIRE_FINGER_FOR_STREAMING = false`); H1–H3 for firmware 5.0.0; PPK2 S1–S7. Plan:
    [PHASE_8_VALIDATION_PLAN](validation/PHASE_8_VALIDATION_PLAN.md). W1/W2 decide whether an extra skin-contact sensor is required.
 2. **Dataset access (Phase 9):** confirm PD@Home access/licence (Radboud), MESA terms (NSRR), WESAD licence, PPP request.
@@ -39,3 +39,6 @@ ADR-0013 (step label corrected additively), ADR-0014 (wear inference on the host
 3. Keep experimental code opt-in until criteria pass.
 
 Details: [Phase 8 final report](audit/PHASE_8_FINAL_REPORT.md).
+
+## Research paper (2026-11-08)
+Paper rebuilt from repository evidence: `docs/research/ParkinSense_paper.{docx,pdf}`; sources in `docs/research/paper/`; status matrix in `docs/research/IMPLEMENTATION_STATUS_MATRIX.md`. Rebuild: `python3 docs/research/paper/make_figures.py && python3 docs/research/paper/build_paper.py`, then `soffice --headless --convert-to pdf`.
