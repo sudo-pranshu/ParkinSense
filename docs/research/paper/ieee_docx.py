@@ -286,7 +286,26 @@ class Paper:
         if wide:
             self.one_column()
         n = len(header)
-        t = self.doc.add_table(rows=2, cols=n)
+        outer = self.doc.add_table(rows=1, cols=1)
+        outer.alignment = WD_TABLE_ALIGNMENT.CENTER
+        outer.autofit = False
+        olay = OxmlElement("w:tblLayout")
+        olay.set(qn("w:type"), "fixed")
+        outer._tbl.tblPr.append(olay)
+        outer._tbl.tblPr.append(parse_xml('<w:tblCellMar xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                                          '<w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/>'
+                                          '<w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>'))
+        outer.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+        ocell = outer.cell(0, 0)
+        ocell.width = Inches(FULL_W if wide else COL_W)
+        outer.columns[0].width = Inches(FULL_W if wide else COL_W)
+        t = ocell.add_table(rows=2, cols=n)
+        for pp in ocell.paragraphs:  # mandatory empty paragraphs around the nested table: make them negligible
+            pp.paragraph_format.space_after = Pt(0)
+            pp.paragraph_format.space_before = Pt(0)
+            pp.paragraph_format.line_spacing = Pt(1)
+            for r in pp.runs:
+                r.font.size = Pt(1)
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
         t.autofit = False
         tblPr = t._tbl.tblPr

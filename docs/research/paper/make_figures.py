@@ -229,8 +229,8 @@ def fig_tremor_bench():
         ax.text(x[i] + 0.18, vc[i] + 0.01, f"{vc[i]:.3f}", ha="center", fontsize=5.4)
     ax.set_xticks(x)
     ax.set_xticklabels(names)
-    ax.set_ylim(0, 1.15)
-    ax.legend(loc="lower left", fontsize=5.6)
+    ax.set_ylim(0, 1.32)
+    ax.legend(loc="upper center", ncol=2, fontsize=5.6, frameon=False)
     ax.set_title("analysis-level, synthetic")
     panel(ax, "(a)")
     ax = axs[1]
