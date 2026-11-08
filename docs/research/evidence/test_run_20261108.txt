@@ -1,0 +1,5 @@
+# executed 2026-11-08 on Linux x86_64, Python 3.13.18, numpy 2.5.3, scipy 1.18.1
+141 passed, 1 deselected, 1 warning in 64.71s (0:01:04)
+flake8 error count: 0
+firmware packet tests: OK
+sketch type-check vs stubs: OK
