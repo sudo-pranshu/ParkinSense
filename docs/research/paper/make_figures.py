@@ -92,11 +92,10 @@ def fig_architecture():
     arrow(ax, (0.42, 0.18), (0.58, 0.36), rad=0.0)
     # cross-pipeline gating
     arrow(ax, (0.37, 0.62), (0.37, 0.54), color=RED, ls="--")
-    ax.text(0.375, 0.575, "motion state,\nf_arm", fontsize=5.6, color=RED, va="center")
+    ax.text(0.385, 0.575, "motion state, f_arm", fontsize=5.4, color=RED, va="center", bbox=dict(fc="white", ec="none", pad=0.4))
     arrow(ax, (0.47, 0.73), (0.52, 0.73), color=RED, ls="--")
-    ax.text(0.485, 0.775, "gate", fontsize=5.6, color=RED, ha="center")
     arrow(ax, (0.60, 0.54), (0.60, 0.62), color=RED, ls="--")
-    ax.text(0.612, 0.58, "REMOVED→REST", fontsize=5.6, color=RED, va="center")
+    ax.text(0.612, 0.58, "REMOVED→REST", fontsize=5.4, color=RED, va="center", bbox=dict(fc="white", ec="none", pad=0.4))
     # engine/outputs
     box(ax, 0.27, 0.01, 0.41, 0.045, "RuntimeEngine: device-clock signal time; live = replay", "#FFFFFF", fs=5.4)
     box(ax, 0.74, 0.70, 0.25, 0.14, "capture.csv (79 columns)\nmetadata.json\n(versions, loss, rate, wrap)", "#FFFFFF")
