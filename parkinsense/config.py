@@ -30,6 +30,9 @@ PIPELINE_VERSION = "3.1.0"
 CAPTURE_SCHEMA_VERSION = "3"
 TREMOR_ALGORITHM_VERSION = "3.0"
 PPG_VERSION = "2.0"
+# Sidecar biomarkers.jsonl: versioned independently of PIPELINE_VERSION (see docs/biomarkers/SIDECAR.md).
+BIOMARKER_SCHEMA = "biomarkers/1.0"
+BIOMARKER_VERSION = "1.0.0"
 # Version of each selectable step algorithm. This is the single source of truth.
 STEP_ALGORITHM_VERSIONS = {"default": "1.1", "periodic": "2.0", "gated": "3.0-dev"}
 # Deprecated alias: the version of the DEFAULT step counter. Until Phase 8 this constant read "2.0" and was

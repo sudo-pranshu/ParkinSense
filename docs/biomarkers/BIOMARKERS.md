@@ -50,7 +50,7 @@ daytime data over valid weeks) and labelled validation.
 ### Heart (`heart_summary`)
 
 Rows with `hr_quality_state = VALID`; ≥ 2 valid minutes required. `hr_median`; `hr_rest_p10`
-(10th percentile in REST, ≥ 20 rows); `rmssd_median`; `coverage_pct` = valid / all analysis rows.
+(10th percentile in REST, ≥ 20 rows); `coverage_pct` = valid / all analysis rows.
 
 ### Activity (`activity_summary`)
 

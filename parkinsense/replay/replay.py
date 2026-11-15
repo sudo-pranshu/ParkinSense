@@ -42,6 +42,7 @@ import numpy as np
 import pandas as pd
 
 from parkinsense import config as C
+from parkinsense.analytics import sidecar
 from parkinsense.protocol import packet as P
 from parkinsense.runtime.engine import CAPTURE_COLUMNS, RuntimeEngine
 from parkinsense.runtime.recorder import atomic_write_json
@@ -168,6 +169,7 @@ def replay(path, out_dir=None, resample=False, realtime=False, speed=1.0,
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows, columns=CAPTURE_COLUMNS).to_csv(out / "capture.csv", index=False)
+        sidecar.write_sidecar(out / "biomarkers.jsonl", analyses)
         atomic_write_json(out / "replay_summary.json", summary)
     return {"summary": summary, "rows": rows, "analyses": analyses}
 

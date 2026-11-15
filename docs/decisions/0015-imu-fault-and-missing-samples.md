@@ -3,11 +3,13 @@
 Status: accepted (owner approved 2026-11-15) · Pipeline 3.0.0 → 3.1.0
 
 ## Problem
+
 Packets with `IMU_FAULT` carry zero IMU fields, and lost packets / short timestamp gaps remove samples from a window.
 In 3.0.0 both entered the 4 s analysis window unchanged: zeros look like a motionless arm, so a dead IMU could be
 published as `REST` / `NO TREMOR`, drive the step gate, and (offline) count as sleep.
 
 ## Decision
+
 * `IMU_MAX_MISSING_FRACTION = 0.02` (`config.py`). For each analysis window,
   `(faulty + missing) / (window + missing) > 0.02` ⇒ the window is **UNKNOWN**. `missing` = samples inferred from lost
   packets (`lost × 10`) or a short timestamp gap (> 0.5 s already resets the windows).
@@ -20,6 +22,7 @@ published as `REST` / `NO TREMOR`, drive the step gate, and (offline) count as s
 * Integrity counters `imu_fault_samples`, `imu_unusable_windows` are added to `integrity()`.
 
 ## Consequences
+
 * Capture schema unchanged (79 columns). `classification` and `tremor_state` gain the value `UNKNOWN`; consumers that
   compare with `"TREMOR"` are unaffected.
 * Recordings without faults or loss replay identically to 3.0.0 (golden regression unchanged); only the label differs.

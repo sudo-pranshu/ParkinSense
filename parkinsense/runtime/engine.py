@@ -370,6 +370,9 @@ class RuntimeEngine:
                                  "arm_movement_rms_dps", "tremor_quality")},
             "hr_quality_state": (C.Quality.RATE_INVALID.value if self.rate_status() == "INVALID"
                                  else ppg.get("hr_quality_state")),
+            "hrv_n_intervals": hrv.get("n_intervals"), "hrv_artifact_pct": hrv.get("artifact_pct"),
+            "hrv_confidence": hrv.get("hrv_confidence"), "hrv_withheld_reason": hrv.get("withheld_reason"),
+            "ppg_noise_rejected": ppg.get("ppg_noise_rejected"), "pulse_periodicity": ppg.get("pulse_periodicity"),
             "ppg_effective_rate_hz": ppg.get("ppg_effective_rate_hz"),
             "motion_coupled_hr": ppg.get("motion_coupled_hr"),
             "device_rate_hz": round(rate, 3) if rate else None,

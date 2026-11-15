@@ -264,6 +264,8 @@ class _Stream:
         res = self.engine.process_packet(bytes(data))
         if res.rows:
             self.rec.write_rows(res.rows)
+        if res.analyses:
+            self.rec.write_analyses(res.analyses)
         capture = str(self.rec.dir / "capture.csv")
         self.live.on_packet(res.rows, res.analyses, capture)
         if res.analyses:

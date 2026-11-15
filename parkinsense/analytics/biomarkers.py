@@ -80,7 +80,9 @@ def heart_summary(df: pd.DataFrame, min_valid_minutes=2.0) -> dict:
         "valid_minutes": round(minutes, 2),
         "hr_median": float(v["heart_rate"].median()),
         "hr_rest_p10": float(rest["heart_rate"].quantile(0.1)) if len(rest) >= 20 else None,
-        "rmssd_median": float(v["rmssd"].dropna().median()) if v["rmssd"].notna().any() else None,
+        # No HRV aggregate on purpose: the only HRV available is 10 s-window and EXPLORATORY (not comparable with
+        # conventional 5 min HRV); it is excluded from summaries and longitudinal insights (ADR-0018).
+        "hrv": "not summarised: 10 s PPG HRV is exploratory",
         "coverage_pct": round(100 * len(v) / max(len(a), 1), 1),
     }
 

@@ -52,7 +52,7 @@ def figures(df):
                        "no-contact period", opacity=0.10)
     if df["rmssd"].notna().any():
         hrv = CH.lines(t, [("RMSSD", df["rmssd"].astype(float), T.HEART), ("SDNN", df["sdnn"].astype(float), T.ACCENT)],
-                       title="HRV (10 s windows — trend use only)", y_title="ms", uirev="cv-hrv")
+                       title="HRV · EXPLORATORY · 10 s windows (not comparable with conventional HRV)", y_title="ms", uirev="cv-hrv")
     else:
         rate = df["ppg_effective_rate_hz"].dropna()
         why = (f"PPG effective rate {rate.median():.0f} Hz < 25 Hz (firmware ≤ v4): HRV withheld"
@@ -75,7 +75,8 @@ def summary(df, sess):
         K.metric_card("Median HR (VALID)", hs.get("hr_median"), "bpm", accent=T.HEART,
                       state="VALID" if hs.get("hr_median") is not None else "INSUFFICIENT_DATA",
                       foot=hs.get("reason") or f"{hs.get('valid_minutes', 0)} valid min"),
-        K.metric_card("Median RMSSD", hs.get("rmssd_median"), "ms", accent=T.HEART, foot="from VALID windows"),
+        K.metric_card("HRV summary", None, "ms", accent=T.HEART, always_badge="EXPLORATORY · 10 s",
+                      foot="10 s HRV is exploratory and not summarised"),
         K.metric_card("VALID coverage", pct("VALID"), "%", accent=T.ACCENT, foot="share of analysis windows"),
         K.metric_card("Motion artefact", pct("MOTION_ARTIFACT"), "%", accent=T.ACTIVITY,
                       foot=f"no contact {pct('NO_CONTACT')} %" if len(q) else None),

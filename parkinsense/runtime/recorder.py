@@ -3,6 +3,7 @@ Session recording: one directory per session, owned by a context manager.
 
     recordings/<YYYYmmdd_HHMMSS>_<session_id>/
         capture.csv        per-sample rows, CAPTURE_COLUMNS (schema v3)
+        biomarkers.jsonl   per-analysis biomarker states (schema biomarkers/1.0)
         metadata.json      provenance: versions, configuration, measured
                            rates, integrity counters, start/end times
     recordings/latest.json pointer used by the dashboard
@@ -24,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from parkinsense import config as C
+from parkinsense.analytics import sidecar
 from parkinsense.protocol import packet as P
 from parkinsense.runtime.engine import CAPTURE_COLUMNS, RuntimeEngine
 
@@ -52,6 +54,7 @@ class SessionRecorder:
         self.device = device or {}
         self.notes = notes
         self._f = None
+        self._bf = None
         self._w = None
         self.rows = 0
         self.started_wall = None
@@ -60,6 +63,7 @@ class SessionRecorder:
     def __enter__(self):
         self.dir.mkdir(parents=True, exist_ok=False)
         self._f = open(self.dir / "capture.csv", "w", newline="")
+        self._bf = open(self.dir / "biomarkers.jsonl", "w", encoding="utf-8", newline="\n")
         self._w = csv.DictWriter(self._f, fieldnames=CAPTURE_COLUMNS, extrasaction="ignore")
         self._w.writeheader()
         self.started_wall = time.time()
@@ -76,6 +80,13 @@ class SessionRecorder:
         self.rows += len(rows)
         self._f.flush()
 
+    def write_analyses(self, analyses) -> None:
+        """Append the biomarker sidecar records for these analyses (see analytics/sidecar.py)."""
+        for m in analyses:
+            self._bf.write(sidecar.dumps(sidecar.biomarker_record(m)) + "\n")
+        if analyses:
+            self._bf.flush()
+
     def metadata(self, status: str) -> dict:
         e = self.engine
         return {
@@ -90,6 +101,8 @@ class SessionRecorder:
             "step_algorithm_version": C.STEP_ALGORITHM_VERSIONS[e.step_algorithm],
             "sleep_algorithm_version": C.SLEEP_ALGORITHM_VERSION,
             "ppg_version": C.PPG_VERSION,
+            "biomarkers": {"file": "biomarkers.jsonl", "schema": C.BIOMARKER_SCHEMA,
+                           "version": C.BIOMARKER_VERSION},
             "firmware_version": e.firmware_version,
             "protocol_versions_seen": sorted(e.versions),
             "config": {
@@ -119,6 +132,10 @@ class SessionRecorder:
 
     def __exit__(self, exc_type, exc, tb):
         try:
+            if self._bf:
+                self._bf.flush()
+                os.fsync(self._bf.fileno())
+                self._bf.close()
             if self._f:
                 self._f.flush()
                 os.fsync(self._f.fileno())
