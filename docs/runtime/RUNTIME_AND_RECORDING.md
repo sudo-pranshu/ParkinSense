@@ -124,7 +124,7 @@ measurement".
 ## 7. Session recording
 
 `SessionRecorder(engine, root="recordings")` is a context manager. On enter it creates
-`recordings/<YYYYmmdd_HHMMSS>_<session_id>/`, opens `capture.csv`, writes `metadata.json`
+`recordings/<YYYYmmdd_HHMMSS>_<session_id>/`, opens `capture.csv` and `biomarkers.jsonl` ([sidecar](../biomarkers/SIDECAR.md)), writes `metadata.json`
 (`status: RECORDING`) and `recordings/latest.json` (pointer for the dashboard). Rows are flushed
 after every packet. On exit — normal, BLE disconnect, Ctrl-C, SIGTERM or exception — the file is
 fsynced and closed and `metadata.json` is rewritten with `COMPLETE` or `ABORTED:<Exception>`.
@@ -138,7 +138,7 @@ JSON files are written atomically (temp file + `os.replace`). The live app refre
   "session_id": "docexample",
   "status": "COMPLETE",
   "capture_schema_version": "3",
-  "pipeline_version": "3.0.0",
+  "pipeline_version": "3.1.0",
   "tremor_algorithm_version": "3.0",
   "step_counter_version": "2.0",
   "ppg_version": "2.0",
@@ -249,7 +249,7 @@ working); 53–79 are appended. Time base per [ADR-0003](../decisions/0003-captu
 | 46 | `sampling_rate` | per analysis (forward-filled) | **measured device rate**, Hz (v2: host arrival rate) |
 | 47 | `packet_version` | per packet | protocol version of this sample's packet |
 | 48 | `flags` | per packet | packet flags (v2) |
-| 49 | `pipeline_version` | per session | `3.0.0` |
+| 49 | `pipeline_version` | per session | `3.1.0` |
 | 50 | `firmware_version` | per session | from DIS (v5) or `--firmware-version` |
 | 51 | `step_counter_version` | per session | algorithm version that ran (`1.1`/`2.0`/`3.0-dev`); legacy recordings: `2.0` = default v1.1, see ADR-0013 |
 | 52 | `ppg_version` | per session | `2.0` |
