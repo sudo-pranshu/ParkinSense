@@ -413,6 +413,16 @@ SQI_SPECTRAL_CONCENTRATION_BW_HZ = 0.2
 # the harmonic even when HR drifts slightly during the analysis window.
 SQI_HARMONIC_BW_HZ = 0.15
 
+# --- Pulse periodicity (WP-09 Stage B, ADR-0017) ---
+# Peak of the normalised autocorrelation of the band-passed IR window over the physiological beat-to-beat lag range.
+# A pulse train repeats (value ~0.4-0.9 depending on HRV and SNR); band-limited or white noise, random-walk drift and
+# an empty optical path do not (<= 0.3 in every noise model tried, see docs/validation/PPG_NOISE_GATE.md). Values are
+# PROVISIONAL: derived from synthetic noise models and a few real recordings, not from labelled ParkinSense hardware data.
+PULSE_PERIODICITY_MIN_WINDOW_SEC = 6.0
+PULSE_PERIODICITY_REJECT = 0.30        # below: no pulse found -> HR / HRV / SpO2 withheld
+PULSE_PERIODICITY_LOW_CONFIDENCE = 0.45  # below: a pulse may exist but cannot be called VALID
+PULSE_RHYTHM_MIN_IN_GRAY_ZONE = 0.70     # in the gray zone, also reject when RR regularity is this poor
+
 # --- Sensor status classification ---
 SENSOR_STATUS_LOW_DC = FINGER_DC_MIN
 SENSOR_STATUS_HIGH_DC = ADC_MAX_VALUE * 0.85
@@ -1275,6 +1285,34 @@ def _compute_signal_quality_impl(
         "pulse_repeatability": round(pulse_repeatability, 3),
         "frequency_stability": round(frequency_stability, 3),
     }
+
+
+def pulse_periodicity(ir, fs: float = 50.0) -> float | None:
+    """
+    Largest normalised-autocorrelation peak of the band-passed IR window at lags 60/MAX_BPM .. 60/MIN_BPM seconds,
+    in [-1, 1]; 0.0 if the window has no local maximum there. None when the window is shorter than
+    PULSE_PERIODICITY_MIN_WINDOW_SEC or flat (nothing to judge, so no gate is applied).
+
+    Amplitude-independent by construction (normalised), so a genuine low-perfusion pulse is not penalised for being
+    small; only a missing periodic structure lowers it.
+    """
+    x = _as_float_array(ir)
+    if x.size < PULSE_PERIODICITY_MIN_WINDOW_SEC * fs or not np.all(np.isfinite(x)):
+        return None
+    y = bandpass_filter(x, fs)
+    y = y - y.mean()
+    energy = float(np.dot(y, y))
+    if energy <= 1e-12:
+        return None
+    n = y.size
+    spec = np.fft.rfft(y, 2 * n)
+    r = np.fft.irfft(spec * np.conj(spec))[:n] / energy
+    lo, hi = int(np.floor(MIN_RR_SEC * fs)), min(int(np.ceil(MAX_RR_SEC * fs)) + 1, n - 1)
+    if hi - lo < 3:
+        return None
+    seg = r[lo:hi]
+    interior = (seg[1:-1] > seg[:-2]) & (seg[1:-1] >= seg[2:])
+    return float(seg[1:-1][interior].max()) if interior.any() else 0.0
 
 
 def compute_signal_quality(ir, fs: float = 50.0) -> dict:

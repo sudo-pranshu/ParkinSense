@@ -32,6 +32,10 @@ from .algorithms import (
     compute_signal_quality,
     estimate_heart_rate,
     estimate_spo2,
+    pulse_periodicity,
+    PULSE_PERIODICITY_LOW_CONFIDENCE,
+    PULSE_PERIODICITY_REJECT,
+    PULSE_RHYTHM_MIN_IN_GRAY_ZONE,
 )
 
 # ---------------------------------------------------------------------------
@@ -431,9 +435,19 @@ class PPGProcessor:
         motion_coupled = False
         spo2_result: dict = {}
 
-        if finger_detected:
+        # WP-09 Stage B: a window with no periodic pulse structure is noise, whatever the finger detector says.
+        # Amplitude-independent, so low-perfusion pulses are not affected (docs/validation/PPG_NOISE_GATE.md).
+        periodicity = pulse_periodicity(ir_arr, self.fs) if finger_detected else None
+        noise_rejected = periodicity is not None and periodicity < PULSE_PERIODICITY_REJECT
+
+        if finger_detected and not noise_rejected:
             # --- Heart rate: raw per-window estimate -> EMA smoothing ---
             hr_result = estimate_heart_rate(ir_arr, self.fs, debug=debug)
+            if (periodicity is not None and periodicity < PULSE_PERIODICITY_LOW_CONFIDENCE
+                    and hr_result.get("rhythm_quality", 1.0) < PULSE_RHYTHM_MIN_IN_GRAY_ZONE):
+                # gray zone: weak periodicity AND irregular peaks -> noise; do not let it reach the HR EMA
+                noise_rejected = True
+                hr_result = {**hr_result, "heart_rate": None, "rr_intervals_ms": [], "confidence": 0.0}
             if debug:
                 hr_debug = hr_result.get("_debug")
             raw_heart_rate = hr_result["heart_rate"]
@@ -475,7 +489,7 @@ class PPGProcessor:
                             + (1.0 - self.hr_ema_alpha) * self._hr_ema
                         )
                         self._hr_outlier_reject_since = None
-            heart_rate = round(self._hr_ema, 1) if self._hr_ema is not None else None
+            heart_rate = round(self._hr_ema, 1) if self._hr_ema is not None and not noise_rejected else None
 
             # --- HR quality breakdown ---
             # peak_quality / rhythm_quality are exposed directly from the
@@ -525,8 +539,8 @@ class PPGProcessor:
                        "withheld_reason": f"PPG effective rate {eff_rate:.1f} Hz < {HRV_MIN_EFFECTIVE_RATE_HZ} Hz"}
 
             # --- SpO2: computed every call, published on a slower cadence ---
-            spo2_result = estimate_spo2(ir_arr, red_arr, self.fs, elapsed_sec=elapsed,
-                                        **self._spo2_prior)
+            spo2_result = ({"spo2": None, "confidence": 0.0, "state": "SEARCHING"} if noise_rejected else
+                           estimate_spo2(ir_arr, red_arr, self.fs, elapsed_sec=elapsed, **self._spo2_prior))
             new_state = spo2_result.get("state", "SEARCHING")
             self._spo2_prior["prior_state"] = new_state
             self._spo2_prior["lock_duration_sec"] = spo2_result.get("lock_duration_sec", 0.0)
@@ -547,7 +561,7 @@ class PPGProcessor:
                 self._published_spo2 = self._latest_valid_spo2
                 self._spo2_last_publish_monotonic = now_monotonic
 
-        spo2 = self._published_spo2 if finger_detected else None
+        spo2 = self._published_spo2 if finger_detected and not noise_rejected else None
 
         # Top-level (whole-reading) confidence: a reading is only as
         # trustworthy as the weakest link — finger contact, general signal
@@ -561,11 +575,12 @@ class PPGProcessor:
 
         if not finger_detected:
             hr_state = Quality.NO_CONTACT.value
-        elif heart_rate is None:
+        elif noise_rejected or heart_rate is None:
             hr_state = Quality.INSUFFICIENT_DATA.value
         elif motion_coupled:
             hr_state = Quality.MOTION_ARTIFACT.value
-        elif hr_quality["overall_confidence"] < HR_MIN_PUBLISH_CONFIDENCE:
+        elif (hr_quality["overall_confidence"] < HR_MIN_PUBLISH_CONFIDENCE
+              or (periodicity is not None and periodicity < PULSE_PERIODICITY_LOW_CONFIDENCE)):
             hr_state = Quality.LOW_CONFIDENCE.value
         else:
             hr_state = Quality.VALID.value
@@ -597,5 +612,7 @@ class PPGProcessor:
             "ppg_effective_rate_hz": None if eff_rate is None else round(eff_rate, 2),
             "motion_coupled_hr": motion_coupled,
             "spo2_state": self._spo2_prior["prior_state"],
-            "spo2_r_value": spo2_result.get("r_value") if finger_detected else None,
+            "spo2_r_value": spo2_result.get("r_value") if finger_detected and not noise_rejected else None,
+            "pulse_periodicity": None if periodicity is None else round(periodicity, 3),
+            "ppg_noise_rejected": bool(noise_rejected),
         }
