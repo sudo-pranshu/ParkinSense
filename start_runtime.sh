@@ -13,7 +13,7 @@ metadata.json is marked COMPLETE.
   --simulate            synthetic signals, no hardware (clearly labelled SIMULATED)
   --replay FILE         stream a recorded capture.csv at real time (labelled REPLAY)
   --port N              API port (default 8000)
-  --host H              API bind address (default 127.0.0.1; use 0.0.0.0 to expose on the LAN)
+  --host H              API bind address (default 127.0.0.1; 0.0.0.0 = LAN opt-in, token required, see docs)
   -- ARGS               passed to python -m parkinsense.runtime.app
                         (e.g. --speed 4, --loop, --start-stopped, --notes "...")
 

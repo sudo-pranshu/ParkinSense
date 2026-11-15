@@ -294,8 +294,9 @@ sub-scores), `latest_ir`, `latest_red`, `signal_time_s`, `motion_pipeline_state`
 and `capture_path`. Keys are only ever added — v2 consumers keep working. `/health` returns
 `status`, `integrity` and `rate_status`. `/live` serves incremental raw samples and analyses
 (by sequence number) for the dashboard; `/session` and `POST /session/{start,stop}` control
-sessions. `python -m parkinsense.runtime.app` binds `0.0.0.0:8000` by default (v2 behaviour,
-needed by the phone app on the LAN); the launch scripts bind `127.0.0.1` unless `--host` is given.
+sessions. The API binds `127.0.0.1:8000` by default (since pipeline 3.1.0; earlier it bound `0.0.0.0`).
+`POST` requests need the `X-ParkinSense-Token` header; LAN access is opt-in (`--host 0.0.0.0`) and then
+reads need the token too — see [ADR-0016](../decisions/0016-api-access-control.md).
 `--simulate` and `--replay CSV` run the same engine and recorder on a synthetic or recorded
 stream; such sessions record `device.source` = `simulated` / `replay`.
 Details: [dashboard and API](../software/DASHBOARD_AND_API.md).
@@ -313,7 +314,8 @@ parkinsense-live --once --no-api --out /data/recordings
 | `--firmware-version` | `unknown` | recorded when the device cannot report it (firmware ≤ v4) |
 | `--out` | `recordings` | session root |
 | `--metrics-file` | `realtime_metrics_v2.json` | atomic live metrics file |
-| `--host` / `--port` | `0.0.0.0` / `8000` | API bind |
+| `--host` / `--port` | `127.0.0.1` / `8000` | API bind (non-loopback host = opt-in LAN access) |
+| `--token` | `$PARKINSENSE_TOKEN`, else token file | API token (≥ 16 chars) |
 | `--no-api` | off | do not start FastAPI |
 | `--once` | off | exit after the first disconnect instead of reconnecting |
 | `--notes` | empty | free text stored in metadata.json |

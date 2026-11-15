@@ -67,14 +67,21 @@ class LiveFeed:
         self._stop.set()
 
     def _get(self, path):
-        with urllib.request.urlopen(self.api + path, timeout=HTTP_TIMEOUT_S) as r:
+        from parkinsense.runtime import auth
+        headers = {auth.HEADER: t} if (t := auth.read_token()) else {}
+        req = urllib.request.Request(self.api + path, headers=headers)
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as r:
             return json.load(r)
 
     def post(self, path) -> dict:
-        req = urllib.request.Request(self.api + path, method="POST")
+        from parkinsense.runtime import auth
+        headers = {auth.HEADER: t} if (t := auth.read_token()) else {}
+        req = urllib.request.Request(self.api + path, method="POST", headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as r:
                 return json.load(r)
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "reason": f"runtime refused the request (HTTP {e.code}); check the API token"}
         except (urllib.error.URLError, OSError, ValueError) as e:
             return {"ok": False, "reason": f"runtime not reachable ({e})"}
 

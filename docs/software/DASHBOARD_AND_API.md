@@ -97,9 +97,8 @@ Categorical state over time is drawn as a strip chart.
 
 ## Live API
 
-Started with the runtime (`--no-api` disables it). FastAPI; `127.0.0.1:8000`
-from the launch scripts, `0.0.0.0:8000` when `parkinsense-live` is run directly
-(so a phone on the LAN can connect).
+Started with the runtime (`--no-api` disables it). FastAPI, bound to `127.0.0.1:8000` unless `--host` says
+otherwise (see *Access control* below).
 
 | Endpoint | Returns |
 |---|---|
@@ -113,8 +112,19 @@ from the launch scripts, `0.0.0.0:8000` when `parkinsense-live` is run directly
 Compatibility: every key of the 2.x `/metrics` is still present; new endpoints
 are additive. The metrics are strict JSON (no NaN).
 
-Security: no authentication. Keep the default `127.0.0.1` unless you need LAN
-access, and then only on a trusted network.
+### Access control (pipeline 3.1.0, [ADR-0016](../decisions/0016-api-access-control.md))
+
+* **Default:** bound to `127.0.0.1`; reads (`/metrics`, `/live`, `/session`, `/health`) need no token; both `POST`
+  endpoints need the header `X-ParkinSense-Token: <token>` (missing/wrong → `401`; no token configured → `403`).
+* **Token:** `--token`, else `$PARKINSENSE_TOKEN`, else the file `$PARKINSENSE_TOKEN_FILE` or
+  `~/.parkinsense/api_token` (created with mode 0600 on first runtime start). The dashboard reads the same sources,
+  so runtime + dashboard on one machine need no configuration. Print it with `cat ~/.parkinsense/api_token`.
+* **LAN opt-in:** `./start_runtime.sh --host 0.0.0.0` (or `parkinsense-live --host 0.0.0.0`). Then every endpoint
+  except `/health` also needs the token, and the runtime logs a warning. Example:
+  `curl -H "X-ParkinSense-Token: $(cat ~/.parkinsense/api_token)" http://<host>:8000/metrics`.
+  There is no TLS: use only on a trusted network; the token travels in clear text.
+* Browsers cannot send the custom header cross-origin without a CORS preflight, which the API does not grant, so a
+  web page cannot start/stop your sessions.
 
 ## Launch scripts
 

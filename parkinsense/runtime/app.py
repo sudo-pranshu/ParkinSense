@@ -25,7 +25,10 @@ HTTP API (additive; v2 consumers of /metrics keep working):
   GET  /health    status, integrity, rate status
   GET  /live      incremental samples + analyses since given sequence numbers
   GET  /session   current session, source, recording state
-  POST /session/stop, /session/start
+  POST /session/stop, /session/start      (require the X-ParkinSense-Token header)
+
+Access (WP-03, ADR-0016): the API binds to 127.0.0.1 by default. POST needs the token; with a non-loopback --host
+(opt-in LAN access) reads need it too, except /health. See parkinsense/runtime/auth.py.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from collections import deque
 from pathlib import Path
 
 from parkinsense import config as C
+from parkinsense.runtime import auth
 from parkinsense.runtime.engine import RuntimeEngine
 from parkinsense.runtime.recorder import SessionRecorder, _jsonable_metrics, atomic_write_json
 
@@ -176,12 +180,27 @@ class Control:
         self.loop.call_soon_threadsafe(self.enabled.set)
 
 
-def build_api(live: LiveState, control: Control | None = None):
-    from fastapi import FastAPI
+def build_api(live: LiveState, control: Control | None = None, token: str | None = None,
+              require_read_token: bool = False):
+    """`token` None => every POST is refused (403). `require_read_token` => GETs other than /health need it too."""
+    from fastapi import Depends, FastAPI, HTTPException, Request
 
     app = FastAPI(title="ParkinSense API")
 
-    @app.get("/metrics")
+    # `from __future__ import annotations` + the lazy FastAPI import: give FastAPI the real type objects.
+    def _authorise(request):
+        if not token:
+            raise HTTPException(403, "API token not configured; state-changing requests are disabled")
+        if not auth.check(request.headers.get(auth.HEADER), token):
+            raise HTTPException(401, f"missing or invalid {auth.HEADER} header")
+
+    def read_guard(request):
+        if require_read_token:
+            _authorise(request)
+
+    _authorise.__annotations__ = read_guard.__annotations__ = {"request": Request}
+
+    @app.get("/metrics", dependencies=[Depends(read_guard)])
     def metrics():
         return live.get()
 
@@ -191,23 +210,23 @@ def build_api(live: LiveState, control: Control | None = None):
         return {"status": m.get("status", "OK"), "integrity": m.get("integrity"),
                 "rate_status": m.get("rate_status")}
 
-    @app.get("/live")
+    @app.get("/live", dependencies=[Depends(read_guard)])
     def live_data(since_sample: int = 0, since_analysis: int = 0,
                   max_samples: int = LIVE_MAX_SAMPLES_PER_RESPONSE):
         return live.live(since_sample, since_analysis, min(max_samples, LIVE_MAX_SAMPLES_PER_RESPONSE))
 
-    @app.get("/session")
+    @app.get("/session", dependencies=[Depends(read_guard)])
     def session():
         return live.session_info()
 
-    @app.post("/session/stop")
+    @app.post("/session/stop", dependencies=[Depends(_authorise)])
     def session_stop():
         if control is None:
             return {"ok": False, "reason": "session control not available"}
         control.request_stop()
         return {"ok": True}
 
-    @app.post("/session/start")
+    @app.post("/session/start", dependencies=[Depends(_authorise)])
     def session_start():
         if control is None:
             return {"ok": False, "reason": "session control not available"}
@@ -363,10 +382,16 @@ async def main_async(args) -> None:
 
     if not args.no_api:
         import uvicorn
-        api = build_api(live, control)
+        lan = not auth.is_loopback(args.host)
+        token = auth.load_or_create_token(args.token)
+        api = build_api(live, control, token=token, require_read_token=lan)
         threading.Thread(target=lambda: uvicorn.run(api, host=args.host, port=args.port,
                                                     log_level="warning"), daemon=True).start()
-        log.info("API on http://%s:%d (/metrics, /live, /session)", args.host, args.port)
+        log.info("API on http://%s:%d (/metrics, /live, /session); POST needs header %s (token file: %s)",
+                 args.host, args.port, auth.HEADER, auth.token_path())
+        if lan:
+            log.warning("API is bound to %s: reachable from the network. Reads also need the token. "
+                        "Physiological data is sensitive; use only on a trusted network.", args.host)
 
     while not stop.is_set():
         if not control.enabled.is_set():
@@ -416,9 +441,12 @@ def parse_args(argv=None):
                     help="record the flashed firmware build (firmware >= 5.0 reports it automatically)")
     ap.add_argument("--out", default="recordings")
     ap.add_argument("--metrics-file", default=C.METRICS_FILENAME)
-    ap.add_argument("--host", default="0.0.0.0",
-                    help="API bind address. Default 0.0.0.0 preserves the v2 behaviour the phone "
-                         "app relies on (LAN access); use 127.0.0.1 to keep it local-only.")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="API bind address (default 127.0.0.1, local only). Opt in to LAN access with e.g. "
+                         "--host 0.0.0.0; reads then require the API token too.")
+    ap.add_argument("--token", default=None,
+                    help="API token (>= 16 chars). Default: $PARKINSENSE_TOKEN, then the token file "
+                         "(~/.parkinsense/api_token, created on first start with mode 0600).")
     ap.add_argument("--port", type=int, default=C.DEFAULT_API_PORT)
     ap.add_argument("--no-api", action="store_true")
     ap.add_argument("--once", action="store_true", help="exit after the first session ends")
