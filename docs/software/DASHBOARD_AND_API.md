@@ -126,6 +126,18 @@ are additive. The metrics are strict JSON (no NaN).
 * Browsers cannot send the custom header cross-origin without a CORS preflight, which the API does not grant, so a
   web page cannot start/stop your sessions.
 
+### Wear state (experimental, opt-in)
+
+`./start_runtime.sh --wear` (or `parkinsense-live --wear`) adds a `wear` object to `/metrics` and an
+**EXPERIMENTAL** "Wear state" card to the Overview page: `wear_state` (`WORN`, `POSSIBLY_REMOVED`, `REMOVED`, …),
+`evidence`, per-sensor states, `inferred: true`, `gating: false`. It is inferred from IMU/PPG signals (there is no wear
+sensor), is **observe-only** in the live runtime (steps, tremor, HR/HRV/SpO₂ outputs are identical with and without
+it; tested) and is not hardware-validated. Without `--wear`, `wear` is `null` and no card is shown. Design and
+limits: [Wear-aware acquisition](../architecture/WEAR_AWARE_ACQUISITION.md).
+
+The 10 s HRV card is labelled **EXPLORATORY · 10 s**: it is not comparable with conventional (5 min) HRV and is not
+used in summaries or insights.
+
 ## Launch scripts
 
 | Script | Purpose |

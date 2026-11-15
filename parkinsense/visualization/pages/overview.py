@@ -84,7 +84,8 @@ def body(snap):
         K.metric_card("Heart rate", _num(m, "heart_rate"), "bpm", state=hr_q, stale=stale, accent=T.HEART, foot=hr_foot),
         K.metric_card("HRV · RMSSD", _num(m, "rmssd"), "ms", state=hr_q if m.get("rmssd") is not None else
                       ("INSUFFICIENT_DATA" if m else None), stale=stale, accent=T.HEART,
-                      foot="10 s window; trend use only"),
+                      always_badge="EXPLORATORY · 10 s",
+                      foot="10 s window — not comparable with conventional HRV; excluded from summaries"),
         K.metric_card("SpO₂", _num(m, "spo2"), "%", state=None, stale=stale, always_badge="ESTIMATE",
                       accent=T.HEART, foot="research estimate — not a clinical measurement"),
         K.metric_card("Contact · signal", "Finger on" if m.get("finger_detected") else ("No finger" if m else None),
@@ -103,10 +104,20 @@ def body(snap):
                       foot=[K.badge(t_q, f"tremor: {t_q}") if t_q else None, K.badge(hr_q, f"hr: {hr_q}") if hr_q else None]),
     ]
 
+    w = m.get("wear")
+    wear_sec = []
+    if w:
+        wear_sec = [K.section("Wear state (experimental)", html.Div([
+            K.metric_card("Wear state", str(w.get("wear_state", "")).replace("_", " ").lower() or None,
+                          stale=stale, accent=T.ACCENT, always_badge="EXPERIMENTAL",
+                          foot=f"inferred from signals, no wear sensor · {w.get('evidence', '')} · "
+                               "observe-only: does not change any measurement"),
+        ], className="grid g4"))]
     cards = [
         K.section("Tremor", html.Div(cards_trem, className="grid g4")),
         K.section("Cardiovascular", html.Div(cards_cardio, className="grid g4")),
         K.section("Activity & data", html.Div(cards_act, className="grid g4")),
+        *wear_sec,
         K.section("Signal details (latest window)", details(m)),
     ]
     return common.banners(snap), common.status_bar(snap), cards, \

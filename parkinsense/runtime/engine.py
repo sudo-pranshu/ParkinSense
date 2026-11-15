@@ -98,7 +98,7 @@ class RuntimeEngine:
     def __init__(self, fs: float = C.SAMPLE_RATE_HZ, hop_samples: int = C.ANALYSIS_HOP_SAMPLES,
                  window_samples: int = C.WINDOW_SAMPLES, firmware_version: str = "unknown",
                  session_id: str | None = None, step_counter: str = "default",
-                 wear_monitor: "bool | WearConfig" = False):
+                 wear_monitor: "bool | WearConfig" = False, wear_gate: bool = True):
         self.fs = fs
         self.hop = hop_samples
         self.window = window_samples
@@ -113,7 +113,10 @@ class RuntimeEngine:
         self.step_algorithm = step_counter
         # Opt-in wear-state inference (Phase 8). Off by default: with it off, behaviour and outputs are
         # exactly those of 3.0.0 (golden replay regression). See docs/architecture/WEAR_AWARE_ACQUISITION.md.
+        # wear_gate=False: observe only. The state is published but never changes steps or any biomarker
+        # (used by the live runtime's experimental --wear option).
         self.wear: WearMonitor | None = None
+        self.wear_gate = wear_gate
         if wear_monitor:
             cfg = wear_monitor if isinstance(wear_monitor, WearConfig) else WearConfig(expected_rate_hz=fs)
             self.wear = WearMonitor(cfg)
@@ -283,7 +286,7 @@ class RuntimeEngine:
             r = m["result"]
             self._step_gate = ("REST" if r["tremor"] and r["tremor_type"] == "REST"
                                else self._motion_state)
-            if self.wear is not None and not self.wear.status.activity_allowed:
+            if self.wear is not None and self.wear_gate and not self.wear.status.activity_allowed:
                 self._step_gate = "REST"       # inferred REMOVED: table movement is not user activity
             if self._step is None and self._step_gate is not None:
                 self._step = self.steps.update(*accel[:, -1], self._step_gate, now=t)
@@ -372,6 +375,9 @@ class RuntimeEngine:
             "device_rate_hz": round(rate, 3) if rate else None,
             "rate_status": self.rate_status(),
             "integrity": self.integrity(),
+            # EXPERIMENTAL, inferred (no wear sensor on this hardware); None unless the monitor is enabled.
+            "wear": None if self.wear is None else {**self.wear.status.to_dict(), "experimental": True,
+                                                    "gating": self.wear_gate},
         }
 
     def integrity(self) -> dict:

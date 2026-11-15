@@ -275,3 +275,33 @@ def test_capture_file_roundtrip_and_cli(tmp_path, capsys):
     assert (tmp_path / "w.json").exists() and "REMOVED" in capsys.readouterr().out
     md = __import__("json").loads((rec.dir / "metadata.json").read_text())
     assert md["wear"]["final_state"] == "REMOVED" and md["metadata_revision"] == 2
+
+
+def test_observe_only_wear_changes_no_biomarker_and_publishes_state():
+    """wear_gate=False (runtime --wear): every metric equals a run without the monitor, plus an experimental block."""
+    from parkinsense.runtime.engine import RuntimeEngine
+    runs = {}
+    for name, kw in (("off", {}), ("observe", {"wear_monitor": FAST, "wear_gate": False})):
+        e = RuntimeEngine(**kw)
+        pk, ts, seq = _packets(60, "moving", FINGER)
+        pk2, _, _ = _packets(200, "table", NO_FINGER, seq0=seq, ts0=ts)
+        for d in pk + pk2:
+            e.process_packet(d)
+        runs[name] = e
+    assert runs["observe"].wear.state == WearState.REMOVED      # state is inferred ...
+    off, obs = dict(runs["off"].metrics), dict(runs["observe"].metrics)
+    w = obs.pop("wear")
+    assert off.pop("wear") is None
+    assert w["experimental"] is True and w["gating"] is False and w["wear_state"] == "REMOVED" and w["inferred"]
+    assert off == obs                                           # ... but nothing else changes
+
+
+def test_overview_renders_experimental_wear_card_only_with_wear_block():
+    import numpy as np
+    from parkinsense.visualization.pages import overview
+    base = {"samples": np.empty((0, 10)), "analyses": [], "meta": {}, "online": True, "data_age_s": 0.1,
+            "stale": False}
+    off = str(overview.body({**base, "latest": {"wear": None}})[2])
+    on = str(overview.body({**base, "latest": {"wear": {"wear_state": "WORN", "evidence": "x"}}})[2])
+    assert "Wear state" not in off and "Wear state" in on and "EXPERIMENTAL" in on
+    assert "EXPLORATORY" in off and "EXPLORATORY" in on          # 10 s HRV card is always labelled

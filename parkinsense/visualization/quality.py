@@ -23,6 +23,9 @@ STATES = {
     "STALE": ("Stale", "q-muted", "No new data from the runtime recently; value is not live."),
     "OFFLINE": ("Runtime offline", "q-muted", "The runtime API is not reachable."),
     "ESTIMATE": ("Uncalibrated estimate", "q-estimate", "Research estimate only; not a calibrated or clinical measurement."),
+    "EXPERIMENTAL": ("EXPERIMENTAL", "q-estimate", "Experimental feature; not validated on hardware."),
+    "EXPLORATORY · 10 s": ("EXPLORATORY · 10 s", "q-estimate",
+                           "10 s window; not comparable with conventional HRV (5 min) and excluded from summaries."),
 }
 
 ORDERED = [q.value for q in Quality]

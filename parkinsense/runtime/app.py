@@ -246,7 +246,8 @@ class _Stream:
     def __init__(self, args, live: LiveState, firmware_version: str, device: dict):
         self.args = args
         self.live = live
-        self.engine = RuntimeEngine(firmware_version=firmware_version)
+        self.engine = RuntimeEngine(firmware_version=firmware_version,
+                                    wear_monitor=bool(getattr(args, "wear", False)), wear_gate=False)
         self.rec = SessionRecorder(self.engine, root=args.out, device=device, notes=args.notes)
         self.last_meta = time.monotonic()
 
@@ -449,6 +450,9 @@ def parse_args(argv=None):
                          "(~/.parkinsense/api_token, created on first start with mode 0600).")
     ap.add_argument("--port", type=int, default=C.DEFAULT_API_PORT)
     ap.add_argument("--no-api", action="store_true")
+    ap.add_argument("--wear", action="store_true",
+                    help="EXPERIMENTAL: infer and publish wear state (worn/removed) in /metrics and the dashboard; "
+                         "observe-only, never changes steps or any biomarker output")
     ap.add_argument("--once", action="store_true", help="exit after the first session ends")
     ap.add_argument("--start-stopped", action="store_true",
                     help="start idle; begin a session with POST /session/start (or the dashboard)")
