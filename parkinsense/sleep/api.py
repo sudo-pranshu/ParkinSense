@@ -66,11 +66,16 @@ def read_acceleration(path):
         kind, tcol = "ble_v1_raw", "timestamp"
     else:
         raise ValueError(f"{path}: unrecognised or unsupported capture format (legacy serial logs are not supported)")
-    df = pd.read_csv(path, usecols=[tcol, "ax", "ay", "az"], dtype={tcol: "int64"})
+    use = [tcol, "ax", "ay", "az"] + (["flags"] if "flags" in cols else [])
+    df = pd.read_csv(path, usecols=use, dtype={tcol: "int64"})
     t_us = df[tcol].to_numpy(dtype="int64")
     if kind != "capture_v3":
         t_us = _unwrap32(t_us)
-    return (t_us - t_us[0]) / 1e6, df[["ax", "ay", "az"]].to_numpy(float), kind
+    acc = df[["ax", "ay", "az"]].to_numpy(float)
+    if "flags" in df:                                  # IMU_FAULT packets carry zeros, not motion: mark missing (WP-07)
+        fault = (pd.to_numeric(df["flags"], errors="coerce").fillna(0).to_numpy("int64") & 4) != 0
+        acc[fault] = np.nan
+    return (t_us - t_us[0]) / 1e6, acc, kind
 
 
 def analyze_file(path, **kw) -> dict:

@@ -26,7 +26,7 @@ def _live_session(tmp_path):
 def test_recorder_lifecycle(tmp_path):
     d, eng = _live_session(tmp_path)
     meta = json.loads((d / "metadata.json").read_text())
-    assert meta["status"] == "COMPLETE" and meta["pipeline_version"] == "3.0.0"
+    assert meta["status"] == "COMPLETE" and meta["pipeline_version"] == "3.1.0"
     assert meta["measured"]["rows_written"] > 0 and meta["integrity"]["bad_packets"] == 0
     assert (tmp_path / "latest.json").exists()
 

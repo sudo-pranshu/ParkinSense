@@ -136,7 +136,10 @@ class RuntimeEngine:
         self._t0_us: int | None = None
         self._hdr_ts: deque = deque(maxlen=RATE_ESTIMATE_PACKETS)
         self._host_t0: float | None = None
-        self._buf = deque(maxlen=window_samples)      # (ax, ay, az, gx, gy, gz, clipped)
+        self._buf = deque(maxlen=window_samples)      # (ax, ay, az, gx, gy, gz, clipped, imu_fault)
+        self._miss = deque(maxlen=window_samples)     # samples known to be missing just before each buffered one
+        self.imu_fault_samples = 0
+        self.imu_unusable_windows = 0
         self._since = 0
         self._motion_state: str | None = None
         self._step: dict | None = None
@@ -147,6 +150,7 @@ class RuntimeEngine:
     def reset_windows(self):
         """Discard windowed/streaming state after a discontinuity."""
         self._buf.clear()
+        self._miss.clear()
         self._since = 0
         self.motion.reset()
         self.ppg.reset()
@@ -203,13 +207,22 @@ class RuntimeEngine:
         if self.wear is not None:
             self._feed_wear(pkt)
 
+        imu_bad = bool(int(pkt.flags) & P.PacketFlags.IMU_FAULT)
+        # Samples known to be missing before this packet: lost packets (v2) or a short timestamp gap (any version).
+        # A gap above MAX_GAP_BEFORE_RESET_S already emptied the buffers, so it is not counted twice.
+        missing = 0
+        if not (gap_s and gap_s > C.MAX_GAP_BEFORE_RESET_S):
+            missing = max(lost * P.BATCH_SIZE, int(round(gap_s * self.fs)) - 1 if gap_s else 0)
+
         for s in pkt.samples:
             self.sample_count += 1
             t = (s.device_time_us - self._t0_us) / 1e6
-            self._buf.append((s.ax, s.ay, s.az, s.gx, s.gy, s.gz, s.possibly_clipped))
+            self._buf.append((s.ax, s.ay, s.az, s.gx, s.gy, s.gz, s.possibly_clipped, imu_bad))
+            self._miss.append(missing if s.index_in_packet == 0 else 0)
+            self.imu_fault_samples += imu_bad
             self.ppg.ingest(s.ir, s.red)
 
-            if self._step_gate is not None:
+            if self._step_gate is not None and not imu_bad:
                 self._step = self.steps.update(s.ax, s.ay, s.az, self._step_gate, now=t)
 
             fresh = False
@@ -252,7 +265,16 @@ class RuntimeEngine:
             accel, gyro = arr[:, 0:3].T, arr[:, 3:6].T
             clipped = float(arr[:, 6].mean())
             rate_ok = self.rate_status() != "INVALID"
-            m = self.motion.process(accel, gyro, t, clipped_fraction=clipped, usable=rate_ok)
+            faulty, missing = float(arr[:, 7].sum()), float(sum(self._miss))
+            lost_frac = (faulty + missing) / (len(arr) + missing)
+            imu_unknown = lost_frac > C.IMU_MAX_MISSING_FRACTION
+            m = self.motion.process(accel, gyro, t, clipped_fraction=clipped, usable=rate_ok and not imu_unknown)
+            if imu_unknown:
+                m = self._as_unknown(m, C.Quality.SENSOR_FAULT if faulty / len(arr) > C.IMU_MAX_MISSING_FRACTION
+                                     else C.Quality.DATA_GAP)
+                self.imu_unusable_windows += 1
+                if self._motion_state is not None:      # entering UNKNOWN: do not bridge steps across it
+                    self.steps.break_continuity()
             self._motion_state = m["context"]["state"]
             # Tremor guard: a confirmed *rest* tremor (no purposeful movement)
             # is not walking. Withholding the moving gate stops the step
@@ -263,11 +285,15 @@ class RuntimeEngine:
                                else self._motion_state)
             if self.wear is not None and not self.wear.status.activity_allowed:
                 self._step_gate = "REST"       # inferred REMOVED: table movement is not user activity
-            if self._step is None:
+            if self._step is None and self._step_gate is not None:
                 self._step = self.steps.update(*accel[:, -1], self._step_gate, now=t)
-            motion_freqs = [m["features"].arm_peak_frequency_hz] if m["features"].arm_rms_dps >= 10 else []
+            motion_freqs = ([m["features"].arm_peak_frequency_hz]
+                            if m["features"].arm_rms_dps >= 10 and not imu_unknown else [])
             ppg = self.ppg.analyze(now=t, motion_state=self._motion_state,
                                    motion_frequencies_hz=motion_freqs)
+            if imu_unknown and ppg.get("hr_quality_state") == C.Quality.VALID.value:
+                # Motion-artefact rejection needs the IMU: with it unavailable HR cannot be called VALID.
+                ppg = {**ppg, "hr_quality_state": C.Quality.LOW_CONFIDENCE.value}
             self.analysis_seq += 1
             self.metrics = self._metrics(m, ppg, pkt, t)
             self.consecutive_errors = 0
@@ -283,6 +309,20 @@ class RuntimeEngine:
                     f"{self.consecutive_errors} consecutive analysis failures; last:\n{self.last_error}")
             return False
 
+    @staticmethod
+    def _as_unknown(m: dict, quality: "C.Quality") -> dict:
+        """Publish an IMU-unusable window as UNKNOWN: no tremor verdict, no motion state, no tremor numbers (WP-07).
+        The HMM was only predicted (see MotionPipeline.process), so its internal state is not corrupted."""
+        r = dict(m["result"])
+        r.update(tremor=False, severity="NOT_ASSESSED", tremor_state="UNKNOWN", tremor_type="NONE",
+                 tremor_quality=quality.value, tremor_window_detected=False, classification="UNKNOWN",
+                 frequency=None, frequency_std=None, band_ratio=None, best_axis=None, axis_agreement=None,
+                 axis_dominance=None, rest_index=None, tremor_probability=None, tremor_evidence=None,
+                 tremor_amplitude_dps=None, tremor_power=None, tremor_snr_db=None, arm_movement_rms_dps=None,
+                 score=None, confidence=None)
+        ctx = {**m["context"], "state": None, "motion_rms": None}
+        return {**m, "result": r, "context": ctx}
+
     def _metrics(self, m, ppg, pkt, t) -> dict:
         r, ctx = m["result"], m["context"]
         step = self._step or {}
@@ -290,13 +330,14 @@ class RuntimeEngine:
         rate = self.device_rate_hz()
         return {
             "_reset_marker": self.resets,
-            "classification": "TREMOR" if r["tremor"] else "NO TREMOR",
+            "classification": r.get("classification") or ("TREMOR" if r["tremor"] else "NO TREMOR"),
             "tremor_score": r["score"], "confidence": r["confidence"], "severity": r["severity"],
             "dominant_frequency": r["frequency"], "frequency_std": r["frequency_std"],
             "band_ratio": r["band_ratio"], "best_axis": r["best_axis"],
             "axis_agreement": r["axis_agreement"], "axis_dominance": r["axis_dominance"],
             "rest_index": r["rest_index"],
-            "motion_state": ctx["state"], "motion_rms": round(ctx["motion_rms"], 4),
+            "motion_state": ctx["state"],
+            "motion_rms": None if ctx["motion_rms"] is None else round(ctx["motion_rms"], 4),
             "steps": step.get("steps"), "cadence": step.get("cadence"),
             "step_rate_hz": step.get("step_rate_hz"), "walking_state": step.get("walking_state"),
             "distance_m": step.get("distance_m"), "active_minutes": step.get("active_minutes"),
@@ -341,6 +382,7 @@ class RuntimeEngine:
             "timestamp_wraps": self.unwrapper.wraps,
             "timestamp_backward_steps": self.unwrapper.backward_steps,
             "window_resets": self.resets, "analysis_errors": self.analysis_errors,
+            "imu_fault_samples": self.imu_fault_samples, "imu_unusable_windows": self.imu_unusable_windows,
             "protocol_versions": sorted(self.versions),
         }
 

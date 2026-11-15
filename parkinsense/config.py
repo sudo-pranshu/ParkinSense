@@ -15,6 +15,10 @@ from enum import Enum
 # Versioning / provenance
 # ---------------------------------------------------------------------------
 
+# 3.1.0 -- IMU faults and missing samples are no longer read as stillness (WP-07, ADR-0015): a window in which more
+#          than IMU_MAX_MISSING_FRACTION of the expected samples are faulty or missing is published as UNKNOWN
+#          (tremor_quality SENSOR_FAULT / DATA_GAP, motion_state empty). Recordings without faults or loss replay
+#          to the same numbers as 3.0.0; only the version label differs.
 # 3.0.0 -- tremor features computed on the un-band-passed gyro spectrum;
 #          motion context excludes the tremor band; HMM temporal filter
 #          replaces the count state machine (published classification now
@@ -22,7 +26,7 @@ from enum import Enum
 #          rate; signal-time clock for all temporal logic. See
 #          docs/decisions/0004..0009. Recordings from 2.x are not comparable.
 # 2.2.0 -- analysis on a fixed hop (ADR-0001); time-based PPG hysteresis.
-PIPELINE_VERSION = "3.0.0"
+PIPELINE_VERSION = "3.1.0"
 CAPTURE_SCHEMA_VERSION = "3"
 TREMOR_ALGORITHM_VERSION = "3.0"
 PPG_VERSION = "2.0"
@@ -61,6 +65,10 @@ PPG_WINDOW_SECONDS = 10.0
 # for frequency-domain analysis beyond 5 %.
 RATE_WARN_FRACTION = 0.02
 RATE_INVALID_FRACTION = 0.05
+
+# Largest fraction of a 4 s analysis window that may be faulty (IMU_FAULT packets) or missing (lost packets, short
+# timestamp gaps) before the window is published as UNKNOWN instead of being analysed (WP-07, ADR-0015).
+IMU_MAX_MISSING_FRACTION = 0.02
 
 # A device-time gap longer than this resets windowed state, so a window never
 # splices pre-gap and post-gap data (review P2-13).
